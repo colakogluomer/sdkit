@@ -1,0 +1,8 @@
+DOD
+- D1 put then get returns the value | PASS | tests/store_test.sh:2
+- D2 a failed put releases the lock | PASS | store.sh:1
+FINDINGS
+- none
+VERIFY
+- command: bash tests/store_test.sh | result: green | ok
+VERDICT: PASS

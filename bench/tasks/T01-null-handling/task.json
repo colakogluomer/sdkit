@@ -1,0 +1,80 @@
+{
+  "schema": "tbench-task/1",
+  "id": "T01",
+  "slug": "null-handling",
+  "version": 1,
+  "title": "Null handling and error propagation",
+  "description": "Defective starter; make the behavior in task.md true without changing the tests. python3 stdlib; pure functions.",
+  "difficulty": "low",
+  "risk": "low",
+  "starter": {
+    "repo": "bench/tasks/T01-null-handling/starter",
+    "kind": "local-fixture",
+    "tree": "9b59451a4e5094d2713c68309d677e67be795465",
+    "provenance": "Authored for SDKit F05-A (2026-10). No third-party code. The defects are deliberate: see task.md for the required behavior."
+  },
+  "public_test": "python3 -m unittest discover -s tests -p 'test_*.py' -q",
+  "hidden_test": {
+    "command": "python3 -m unittest discover -s hidden_tests -p 'test_*.py' -v",
+    "min_tests": 14,
+    "evaluator_dir": "bench/evaluator/T01-null-handling"
+  },
+  "editable": [
+    "app"
+  ],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "`display_name` returns `profile.full_name` stripped, when it is a non-blank string."
+    },
+    {
+      "id": "R2",
+      "text": "Otherwise (profile missing or `None`, `full_name` missing, `None`, not a string, or blank) it returns the stripped `username`."
+    },
+    {
+      "id": "R3",
+      "text": "If there is no usable username either, or `user` is `None`, it returns `\"Unknown user\"`. It never raises for dict or `None` input."
+    },
+    {
+      "id": "R4",
+      "text": "`load_display_name` raises `ValueError` when `user_id` is `None`, without calling the repository."
+    },
+    {
+      "id": "R5",
+      "text": "A missing user (`repo.get` returns `None`) raises `UserNotFound`."
+    },
+    {
+      "id": "R6",
+      "text": "Any other exception raised by the repository is re-raised as `ServiceError` with the original as `__cause__`. It is never swallowed and never turned into an empty string."
+    },
+    {
+      "id": "R7",
+      "text": "`UserNotFound` raised by the repository itself passes through unchanged (not wrapped)."
+    },
+    {
+      "id": "R8",
+      "text": "A successful lookup still returns the display name from rules 1 to 3."
+    }
+  ],
+  "limits": {
+    "agent_timeout_s": 1800,
+    "test_timeout_s": 60,
+    "max_output_bytes": 1048576
+  },
+  "environment": {
+    "python": ">=3.9",
+    "network": false,
+    "commands": [
+      "python3",
+      "git"
+    ]
+  },
+  "reference": {
+    "location": "bench/evaluator/T01-null-handling/variants/reference",
+    "visible_to_agent": false
+  },
+  "checksums": {
+    "visible_sha256": "f0d3c53a26a81883a572b7efee3bdfd6597e13b2567b76068c8a0c646ab0dc7a",
+    "evaluator_sha256": "59b5d0e69aa8353a1a90b8458c43f9c781817d18d2bd878348c98b3345f1c7dc"
+  }
+}

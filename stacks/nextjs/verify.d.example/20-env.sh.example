@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Env policy (see rules/nextjs-idioms.md): no secrets in NEXT_PUBLIC_*, new env reads are documented in .env.example.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+added="$(added_lines '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.env*' ':!.env.local' ':!*.test.*' ':!*.spec.*')"
+echo "$added" | grep -nE 'NEXT_PUBLIC_[A-Z0-9_]*(SECRET|TOKEN|PASSWORD|PRIVATE_KEY)' \
+  && echo "FAIL: secret-looking name in a NEXT_PUBLIC_ variable (it ships to the browser)"
+
+if [ -f .env.example ]; then
+  for v in $(added_lines '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' ':!*.test.*' ':!*.spec.*' \
+      | grep -oE 'process\.env\.[A-Z][A-Z0-9_]*' | sed 's/process\.env\.//' | sort -u); do
+    case "$v" in NODE_ENV|NEXT_RUNTIME|VERCEL*|CI) continue ;; esac
+    grep -q "$v" .env.example || echo "WARN: process.env.$v is read but not mentioned in .env.example"
+  done
+fi
+exit 0

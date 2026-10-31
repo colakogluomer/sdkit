@@ -1,0 +1,2 @@
+T1 a.sh | T2 b.sh, independent.
+HANDOFF-RESULT/1 | id: contract-multi-chain/plan | role: engineer | status: done | artifacts: none | blockers: none | next: -

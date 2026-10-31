@@ -1,0 +1,29 @@
+{
+  "schema": "tbench-registry/1",
+  "tasks": {
+    "T01@1": {
+      "dir": "T01-null-handling",
+      "manifest_sha256": "b98b0bf8e54c69a195e39d75a7267cb08b268874ac85d4e7ac4c1eb07c6c00ac"
+    },
+    "T02@1": {
+      "dir": "T02-input-validation",
+      "manifest_sha256": "60c27bac0d6e65727023039c881914d243506715d794e3913b13b57903cfaf88"
+    },
+    "T03@1": {
+      "dir": "T03-paginated-api",
+      "manifest_sha256": "6a29756455eff8d2fba3ab5766168042e35c4fd3bf3d3090f252b251250056a6"
+    },
+    "T04@1": {
+      "dir": "T04-cache-race",
+      "manifest_sha256": "8493347c95794f0ed3aa430370970f1ed3a50ec22012cde2b0cddb64ac402067"
+    },
+    "T05@1": {
+      "dir": "T05-authz-bypass",
+      "manifest_sha256": "e6e5db23f257e48cf10678d174729af7945afc3e91db1016e51986c472063cf1"
+    },
+    "T06@1": {
+      "dir": "T06-order-consistency",
+      "manifest_sha256": "c667a31ec894298845182688cf8506a6338c64a1f232f0fa6436bfb6e96c7ba8"
+    }
+  }
+}

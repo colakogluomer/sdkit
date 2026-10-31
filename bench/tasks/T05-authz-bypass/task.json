@@ -1,0 +1,80 @@
+{
+  "schema": "tbench-task/1",
+  "id": "T05",
+  "slug": "authz-bypass",
+  "version": 1,
+  "title": "Authorization bypass prevention",
+  "description": "Defective starter; make the behavior in task.md true without changing the tests. python3 stdlib; in-memory service.",
+  "difficulty": "high",
+  "risk": "high",
+  "starter": {
+    "repo": "bench/tasks/T05-authz-bypass/starter",
+    "kind": "local-fixture",
+    "tree": "8d8059bd299663510dd053070a6b436fa6792473",
+    "provenance": "Authored for SDKit F05-A (2026-10). No third-party code. The defects are deliberate: see task.md for the required behavior."
+  },
+  "public_test": "python3 -m unittest discover -s tests -p 'test_*.py' -q",
+  "hidden_test": {
+    "command": "python3 -m unittest discover -s hidden_tests -p 'test_*.py' -v",
+    "min_tests": 21,
+    "evaluator_dir": "bench/evaluator/T05-authz-bypass"
+  },
+  "editable": [
+    "app"
+  ],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "Every operation first requires the actor to exist in the directory AND be `active`. Otherwise raise `Unauthenticated`."
+    },
+    {
+      "id": "R2",
+      "text": "A document is visible to its owner, to any user it is shared with (`\"read\"` or `\"write\"`), and to users whose directory role is `\"admin\"`."
+    },
+    {
+      "id": "R3",
+      "text": "`get` of a document the actor cannot see raises `NotFound`, exactly like a missing id. `list` returns only visible documents ordered by id."
+    },
+    {
+      "id": "R4",
+      "text": "`update` is allowed for the owner and for users shared with `\"write\"`. A user who can see the document but only has `\"read\"`"
+    },
+    {
+      "id": "R5",
+      "text": "`update` may only change `title` and `body`. Any other key in `changes` (`owner_id`, `id`, `shared`, anything else) raises `ValueError`"
+    },
+    {
+      "id": "R6",
+      "text": "`share` is allowed for the owner only. Other visible actors get `Forbidden`, invisible ones `NotFound`. `level` must be `\"read\"` or `\"write\"`,"
+    },
+    {
+      "id": "R7",
+      "text": "`delete` is allowed for the owner and for admins. Everyone else who can see the document gets `Forbidden`, invisible ones `NotFound`."
+    },
+    {
+      "id": "R8",
+      "text": "Rule order for every action on a document: Unauthenticated, then NotFound (invisible/missing), then Forbidden, then ValueError for bad input."
+    }
+  ],
+  "limits": {
+    "agent_timeout_s": 1800,
+    "test_timeout_s": 60,
+    "max_output_bytes": 1048576
+  },
+  "environment": {
+    "python": ">=3.9",
+    "network": false,
+    "commands": [
+      "python3",
+      "git"
+    ]
+  },
+  "reference": {
+    "location": "bench/evaluator/T05-authz-bypass/variants/reference",
+    "visible_to_agent": false
+  },
+  "checksums": {
+    "visible_sha256": "45e7ae18a1aa85294bc36daa86eef055c83a871c4bdb2cde57087f3ea4add03d",
+    "evaluator_sha256": "d0663256a22cdfbe749531153044a5854ec2ba3f883fa3fdeeb41a002b6185cb"
+  }
+}

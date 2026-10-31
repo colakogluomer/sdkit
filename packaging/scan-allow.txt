@@ -1,0 +1,8 @@
+# Lines the publishability scan may ignore (extended regex, one per line). Keep this list short and justified.
+# the URL regex in open-pr.sh and the dummy password in the formula-generator test are not credentials
+repo_match = re\.match
+dummy-pw
+# the plugin author field is intended
+"name": "wecii"
+# an earlier commit used a placeholder password against example.org in a test
+user:secret@example\.org

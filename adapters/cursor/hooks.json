@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-prod.sh",
+        "timeout": 10
+      },
+      {
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-git.sh",
+        "timeout": 10
+      },
+      {
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-pr.sh",
+        "timeout": 10
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-secrets.sh",
+        "timeout": 10
+      }
+    ],
+    "preToolUse": [
+      {
+        "matcher": "Write|Delete",
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-phase.sh",
+        "timeout": 10
+      },
+      {
+        "matcher": "Write|Delete",
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-secrets.sh",
+        "timeout": 10
+      },
+      {
+        "matcher": "Write|Delete",
+        "command": "__KIT_HOOKS__/adapt.sh cursor guard-protected.sh",
+        "timeout": 10
+      },
+      {
+        "matcher": "Write|Delete",
+        "command": "__KIT_HOOKS__/adapt.sh cursor frozen-tests.sh",
+        "timeout": 10
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "__KIT_HOOKS__/adapt.sh cursor post-edit-fmt.sh",
+        "timeout": 20
+      }
+    ]
+  }
+}

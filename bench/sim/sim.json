@@ -1,0 +1,144 @@
+{
+  "schema": "tbench-sim/1",
+  "label": "SIMULATED FIXTURE DATA - NOT A MEASUREMENT. No model was invoked; every number below was written by hand to exercise the harness.",
+  "prices": {
+    "sim-model": {
+      "in": 3,
+      "out": 15,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    }
+  },
+  "strategies": {
+    "baseline": {
+      "kind": "metrics",
+      "in": 30000,
+      "out": 8000,
+      "cache_read": 90000,
+      "cache_write": 15000,
+      "llm_calls": 14,
+      "agent_calls": 1,
+      "retries": 0,
+      "dur_s": 240,
+      "roles": {
+        "developer": 1.0
+      },
+      "phases": [
+        [
+          "implement",
+          1.0
+        ]
+      ]
+    },
+    "sdkit-standard": {
+      "kind": "telemetry",
+      "in": 52000,
+      "out": 14000,
+      "cache_read": 160000,
+      "cache_write": 26000,
+      "llm_calls": 26,
+      "agent_calls": 3,
+      "retries": 0,
+      "dur_s": 520,
+      "roles": {
+        "developer": 0.7,
+        "verifier": 0.3
+      },
+      "phases": [
+        [
+          "intake",
+          0.1
+        ],
+        [
+          "plan",
+          0.2
+        ],
+        [
+          "implement",
+          0.5
+        ],
+        [
+          "verify",
+          0.2
+        ]
+      ]
+    },
+    "sdkit-high-assurance": {
+      "kind": "telemetry",
+      "in": 85000,
+      "out": 22000,
+      "cache_read": 260000,
+      "cache_write": 40000,
+      "llm_calls": 41,
+      "agent_calls": 5,
+      "retries": 1,
+      "dur_s": 900,
+      "roles": {
+        "developer": 0.5,
+        "verifier": 0.2,
+        "reviewer": 0.15,
+        "security-auditor": 0.15
+      },
+      "phases": [
+        [
+          "intake",
+          0.1
+        ],
+        [
+          "plan",
+          0.2
+        ],
+        [
+          "implement",
+          0.4
+        ],
+        [
+          "verify",
+          0.3
+        ]
+      ]
+    }
+  },
+  "task_scale": {
+    "T01": 0.5,
+    "T02": 0.6,
+    "T03": 1.0,
+    "T04": 1.2,
+    "T05": 1.6,
+    "T06": 1.8
+  },
+  "outcomes": {
+    "baseline": {
+      "T01": "reference",
+      "T02": "partial",
+      "T03": "reference",
+      "T04": "partial",
+      "T05": "partial",
+      "T06": "partial"
+    },
+    "sdkit-standard": {
+      "T01": "reference",
+      "T02": "reference",
+      "T03": "reference",
+      "T04": "reference",
+      "T05": "partial",
+      "T06": "reference"
+    },
+    "sdkit-high-assurance": {
+      "T01": "reference",
+      "T02": "reference",
+      "T03": "reference",
+      "T04": "reference",
+      "T05": "reference",
+      "T06": "reference"
+    }
+  },
+  "overrides": {
+    "baseline/T03": {
+      "usage": "unavailable"
+    },
+    "sdkit-standard/T05": {
+      "retries": 1
+    }
+  }
+}

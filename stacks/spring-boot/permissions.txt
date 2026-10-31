@@ -1,0 +1,4 @@
+Bash(mvn *)
+Bash(./mvnw *)
+Bash(gradle *)
+Bash(./gradlew *)

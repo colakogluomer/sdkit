@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Docs policy (adapt to your layout): an API/router change should carry a docs/openapi.yaml update.
+dir="${SERVICES_DIR:-services}"
+for svc in $(echo "$VERIFY_CHANGED_GO" | grep -E "^$dir/[^/]+/internal/(api|http)/" | grep -v '_test\.go' | cut -d/ -f2 | sort -u); do
+  echo "$VERIFY_CHANGED" | grep -q "^$dir/$svc/docs/openapi.yaml$" \
+    || echo "WARN: $dir/$svc API/router changed but docs/openapi.yaml did not (ignore if no endpoint changed)"
+done
+exit 0

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Migration policy (Flyway; adapt the path to your layout): unique versions, applied migrations are immutable.
+# Liquibase: apply the same idea to changelog changeSet ids; never edit a changeSet that has already run.
+dir="${MIGRATION_DIR:-src/main/resources/db/migration}"
+
+# duplicate version numbers among all V<n>__*.sql (only when a migration changed)
+if echo "$VERIFY_CHANGED" | grep -qE "(^|/)$dir/V[0-9][^/]*__.*\.sql$"; then
+  for d in $(git ls-files -co --exclude-standard | grep -E "(^|/)$dir/V[0-9][^/]*__.*\.sql$" | xargs -n1 dirname | sort -u); do
+    dup="$(ls "$d" | grep -E '^V[0-9]' | sed -E 's/^V([0-9._]+)__.*/\1/' | sort | uniq -d)"
+    [ -n "$dup" ] && echo "FAIL: duplicate Flyway version(s) in $d: $(echo $dup)"
+  done
+fi
+
+# an already-committed migration must not be modified
+git diff --name-status "$VERIFY_MERGE_BASE" | grep -E "^M[[:space:]].*(^|/)$dir/V[0-9][^/]*__.*\.sql$" |
+  while IFS= read -r line; do echo "FAIL: applied migration modified: ${line#*[[:space:]]}"; done
+exit 0

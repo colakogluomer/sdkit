@@ -1,0 +1,12 @@
+# Personal and runtime files stay out of the shared setup
+settings.local.json
+.frozen
+.sdd/
+.cc-writes/
+scheduled_tasks.lock
+memory/
+work/
+
+# a root *.env rule would hide this file; it holds settings only, never secrets
+!sdkit.env
+.verify-cache/

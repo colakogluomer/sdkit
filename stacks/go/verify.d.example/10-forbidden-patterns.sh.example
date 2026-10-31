@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Code policy (see rules/go-idioms.md): no debug printing, no init(), TODOs carry a reference.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+added="$(added_lines '*.go' ':!*_test.go')"
+echo "$added" | grep -nE 'log\.Printf|fmt\.Println' && echo "FAIL: log.Printf/fmt.Println added (use the project's logger)"
+echo "$added" | grep -nE '^\+func init\(\)' && echo "FAIL: init() added"
+added_lines '*.go' | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+exit 0

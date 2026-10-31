@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Docs policy (adapt to your layout): a changed MVC endpoint should come with an OpenAPI document update in the same module.
+mapping='@(Get|Post|Put|Delete|Patch|Request)Mapping'
+for f in $(echo "$VERIFY_CHANGED_SRC" | grep -E '\.(java|kt)$' | grep -vE 'Test\.(java|kt)$' || true); do
+  [ -f "$f" ] && grep -qE "$mapping" "$f" || continue
+  mod="${f%%/src/*}"; [ "$mod" = "$f" ] && mod="."
+  if [ "$mod" = "." ]; then pat='(openapi|swagger)[^/]*\.(ya?ml|json)$'; else pat="^$mod/.*(openapi|swagger)[^/]*\.(ya?ml|json)$"; fi
+  echo "$VERIFY_CHANGED" | grep -qE "$pat" \
+    || echo "WARN: $f declares endpoints but no openapi/swagger file changed in ${mod} (ignore if no endpoint changed)"
+done
+exit 0

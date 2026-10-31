@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test stand-in for the openspec CLI. Like the real one it writes skills only for the tools it is asked to set up:
+# claude -> .claude/skills, every other tool -> .agents/skills. Records `init` arguments.
+case "${1:-}" in
+  --version) echo "1.13.2-stub" ;;
+  init) shift; echo "$*" >> "${OPENSPEC_STUB_LOG:-/dev/null}"
+        tools=""; while [ $# -gt 0 ]; do [ "$1" = "--tools" ] && tools="$2"; shift; done
+        mkdir -p openspec/changes openspec/specs; echo "schema: spec-driven" > openspec/config.yaml
+        for t in $(echo "$tools" | tr ',' ' '); do
+          case "$t" in claude) mkdir -p .claude/skills/openspec-propose ;; *) mkdir -p .agents/skills/openspec-propose ;; esac
+        done
+        echo "Created: stub" ;;
+esac

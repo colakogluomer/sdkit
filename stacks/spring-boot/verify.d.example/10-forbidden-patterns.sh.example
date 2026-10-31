@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Code policy (see rules/spring-idioms.md): constructor injection, SLF4J, TODOs carry a reference.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+added="$(added_lines '*.java' '*.kt' ':!*Test.java' ':!*Test.kt' ':!*IT.java')"
+echo "$added" | grep -nE '^\+[[:space:]]*@Autowired[[:space:]]*$|^\+[[:space:]]*@Autowired[[:space:]]+(private|protected|public)?[[:space:]]*[A-Za-z<>]+[[:space:]]+[A-Za-z0-9_]+[[:space:]]*;' \
+  && echo "FAIL: field @Autowired added (use constructor injection)"
+echo "$added" | grep -nE 'System\.(out|err)\.print|printStackTrace\(\)' && echo "FAIL: System.out/printStackTrace added (use SLF4J)"
+added_lines '*.java' '*.kt' | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+
+# controllers should expose DTOs, not model types
+for f in $(echo "$VERIFY_CHANGED_SRC" | grep -E '\.(java|kt)$' || true); do
+  [ -f "$f" ] || continue
+  grep -q '@RestController' "$f" && grep -qE '^import [a-zA-Z0-9_.]*\.(entity|domain|model)\.' "$f" \
+    && echo "WARN: $f is a @RestController importing entity/domain types (return DTOs)"
+done
+exit 0

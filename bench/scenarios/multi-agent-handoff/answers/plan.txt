@@ -1,0 +1,1 @@
+T1 a.sh | T2 b.sh, independent.

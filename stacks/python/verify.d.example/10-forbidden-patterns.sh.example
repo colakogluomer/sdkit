@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Code policy (see rules/python-idioms.md): no bare except, no print, no mutable defaults, TODOs carry a reference.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+added="$(added_lines '*.py' ':!*test_*.py' ':!*_test.py' ':!*/tests/*' ':!tests/*')"
+echo "$added" | grep -nE '^\+[[:space:]]*except[[:space:]]*:' && echo "FAIL: bare except added (catch specific exceptions)"
+echo "$added" | grep -nE '^\+[[:space:]]*print\(' && echo "WARN: print() added in non-test code (use logging)"
+echo "$added" | grep -nE '^\+[[:space:]]*def .*=[[:space:]]*(\[\]|\{\}|set\(\))[,)]' && echo "FAIL: mutable default argument added"
+added_lines '*.py' | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+exit 0

@@ -1,0 +1,2 @@
+tests are in test.sh already.
+HANDOFF-RESULT/1 | id: contract-multi-chain/tw | role: test-writer | status: done | artifacts: none | blockers: none | next: -

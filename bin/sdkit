@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# sdkit: the one command for the spec-driven-kit. Works from a git checkout or installed by a package manager
+# (the installed command is a symlink; the kit's files are found through it).
+#   sdkit init [options] [dir]     set a repo up (project profile, host files, OpenSpec)         -> bin/init.sh
+#   sdkit doctor [dir]             check a repo's setup and say what to fix                       -> bin/doctor.sh
+#   sdkit sync [--check] [dir]     refresh the kit's files in a repo (--check: only report drift) -> bin/sync.sh
+#   sdkit upgrade [--migrate [--apply]] [dir]   bring a repo up to date; --migrate moves a pre-1.0 setup into .sdkit/ -> bin/upgrade.sh
+#   sdkit install [--status|--uninstall]   register this kit on the machine for the git hooks     -> bin/install.sh
+#   sdkit version | where | help
+set -eu
+src="${BASH_SOURCE[0]}"
+while [ -h "$src" ]; do   # follow symlinks without readlink -f (macOS)
+  dir="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+done
+BIN="$(cd -P "$(dirname "$src")" && pwd)"
+ROOT="$(cd "$BIN/.." && pwd)"
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+
+case "$cmd" in
+  init|doctor|sync|upgrade|install) exec "$BIN/$cmd.sh" "$@" ;;
+  version|--version|-v) echo "sdkit $(jq -r .version "$ROOT/.claude-plugin/plugin.json")" ;;
+  where) echo "$ROOT" ;;
+  help|--help|-h) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "sdkit: unknown command '$cmd' (try: sdkit help)" >&2; exit 2 ;;
+esac

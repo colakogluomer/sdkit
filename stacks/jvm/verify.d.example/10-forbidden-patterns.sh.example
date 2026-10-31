@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Code policy (see rules/jvm-idioms.md): SLF4J, TODOs carry a reference.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+added="$(added_lines '*.java' '*.kt' ':!*Test.java' ':!*Test.kt' ':!*IT.java')"
+echo "$added" | grep -nE 'System\.(out|err)\.print|printStackTrace\(\)' && echo "FAIL: System.out/printStackTrace added (use SLF4J)"
+added_lines '*.java' '*.kt' | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+
+exit 0

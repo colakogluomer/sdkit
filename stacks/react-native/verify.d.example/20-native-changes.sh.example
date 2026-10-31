@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Native policy (see rules/rn-idioms.md): native and app-config changes need a manual device check; build artifacts and
+# credentials must never be committed.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+native="$(printf '%s\n' "$VERIFY_CHANGED" | grep -E '(^|/)(ios|android)/|(^|/)(app\.json|app\.config\.[a-z]+|Podfile|build\.gradle)$')"
+if [ -n "$native" ]; then
+  echo "WARN: native/config files changed, build and smoke-test on a device or simulator before merging:"
+  echo "$native" | sed 's/^/WARN:   /'
+fi
+
+# only files that are not deleted and not ignored count as added
+forbidden='(^|/)ios/Pods/|(^|/)android/build/|\.(keystore|jks)$|(^|/)GoogleService-Info\.plist$|(^|/)google-services\.json$'
+bad="$( { git diff --name-only --diff-filter=AM "$VERIFY_MERGE_BASE"; git ls-files -o --exclude-standard; } | sort -u | grep -E "$forbidden")"
+[ -n "$bad" ] && echo "$bad" | while IFS= read -r f; do echo "FAIL: $f must not be committed (build output or credentials; add it to .gitignore)"; done
+exit 0

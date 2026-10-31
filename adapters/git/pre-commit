@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# spec-driven-kit: commit guard shim. Uses the project's copy of the kit if there is one, else the kit installed on this machine.
+top="$(git rev-parse --show-toplevel)"
+for d in ${KIT_DIR:-} .sdkit .agentkit .claude .codex; do [ -n "$d" ] && [ -x "$top/$d/scripts/guard.sh" ] && exec "$top/$d/scripts/guard.sh" pre-commit; done
+kit="${SPEC_KIT_HOME:-$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/spec-driven-kit/home" 2>/dev/null)}"
+# installed with a package manager (brew): the command knows where the kit is, and keeps knowing after an upgrade
+[ -x "$kit/scripts/guard.sh" ] || { command -v sdkit >/dev/null 2>&1 && kit="$(sdkit where)"; }
+[ -n "$kit" ] && [ -x "$kit/scripts/guard.sh" ] && exec "$kit/scripts/guard.sh" pre-commit
+echo "spec-driven-kit: kit not installed on this machine, commit guard skipped (brew install sdkit, or run <kit>/bin/install.sh)" >&2
+exit 0

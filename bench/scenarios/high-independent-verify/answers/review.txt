@@ -1,0 +1,3 @@
+- MINOR | store.sh:1 | naming | a nit | rename
+SUMMARY: 0 blockers, 0 major, 1 minor
+VERDICT: PASS

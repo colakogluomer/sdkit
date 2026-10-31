@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Dependency policy: lockfile follows package.json; native libraries need a rebuilt dev client.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+for pj in $(printf '%s\n' "$VERIFY_CHANGED" | grep -E '(^|/)package\.json$'); do
+  dir="$(dirname "$pj")"
+  diff="$(git diff -U0 "$VERIFY_MERGE_BASE" -- "$pj")"
+  [ -z "$diff" ] && diff="$(added_lines "$pj")"
+  echo "$diff" | grep -qE '^\+[[:space:]]*"[^"]+":[[:space:]]*"[^"]+",?[[:space:]]*$' || continue
+
+  if ! printf '%s\n' "$VERIFY_CHANGED" | grep -qE "^($dir/)?(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?)$|^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?)$"; then
+    echo "WARN: $pj changed but no lockfile did (run the package manager install and commit the lockfile)"
+  fi
+  echo "$diff" | grep -E '^\+[[:space:]]*"(@[^/"]+/)?react-native-[^"]*"' | while IFS= read -r l; do
+    echo "WARN: new/changed native-capable dependency ${l//[+ \",]/}: rebuild the dev client / pods and test on a device"
+  done
+done
+exit 0

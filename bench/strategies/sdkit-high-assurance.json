@@ -1,0 +1,13 @@
+{
+  "schema": "tbench-strategy/1",
+  "name": "sdkit-high-assurance",
+  "description": "SDKit with the high-assurance profile (sdd.sh start --profile high-assurance): independent verifier mandatory at any risk, contracts for every role; high risk adds reviewer and security-auditor.",
+  "workflow": "sdkit",
+  "profile": "high-assurance",
+  "sdkit": true,
+  "risk_floor": "inherit",
+  "agent_roles": ["developer", "verifier", "reviewer", "security-auditor"],
+  "independent_verification": "always",
+  "env": {},
+  "same_as_other_strategies": ["model", "provider", "tools", "task_text", "starter_revision", "limits"]
+}

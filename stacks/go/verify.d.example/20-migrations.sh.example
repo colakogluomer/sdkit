@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Migration policy (adapt to your layout): every .up.sql ships with its .down.sql.
+for f in $(echo "$VERIFY_CHANGED" | grep '\.up\.sql$' || true); do
+  [ -f "${f%.up.sql}.down.sql" ] || echo "FAIL: missing down migration for $f"
+done
+exit 0

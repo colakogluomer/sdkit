@@ -1,0 +1,4 @@
+NO FINDINGS
+- checked lock handling and path use in store.sh
+SUMMARY: 0 critical, 0 high, 0 medium, 0 low
+VERDICT: PASS

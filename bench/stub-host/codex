@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# Deterministic stand-in for a host CLI, used by bench/run.sh in simulated mode: no model, no network. It "does the work" of the step
+# named in SDKIT_BENCH_STEP by copying the scenario's sim/<step>/ files into the working directory, and answers with
+# answers/<step>.txt. Token usage comes from usage/<step> ("in out cache_read cache_write"); without that file it prints none,
+# like a host that reports nothing. Everything it reports is a fixture, which is why simulated results carry mode "simulated".
+. "$(dirname "$0")/stub-lib.sh"
+
+# codex exec ... --output-last-message FILE: the answer goes to FILE and no token usage is printed
+out=""; while [ $# -gt 0 ]; do [ "$1" = --output-last-message ] && out="$2"; shift; done
+[ -n "$out" ] && printf '%s\n' "$text" > "$out"

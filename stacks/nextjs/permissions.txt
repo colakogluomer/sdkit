@@ -1,0 +1,5 @@
+Bash(node *)
+Bash(npm *)
+Bash(npx *)
+Bash(pnpm *)
+Bash(yarn *)

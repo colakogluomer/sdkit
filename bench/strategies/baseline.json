@@ -1,0 +1,13 @@
+{
+  "schema": "tbench-strategy/1",
+  "name": "baseline",
+  "description": "Ordinary agentic development: one coding agent, the task text, the repository and its tools. No SDKit lifecycle, roles, gates or hooks.",
+  "workflow": "none",
+  "profile": null,
+  "sdkit": false,
+  "risk_floor": "n/a",
+  "agent_roles": ["developer"],
+  "independent_verification": false,
+  "env": {},
+  "same_as_other_strategies": ["model", "provider", "tools", "task_text", "starter_revision", "limits"]
+}

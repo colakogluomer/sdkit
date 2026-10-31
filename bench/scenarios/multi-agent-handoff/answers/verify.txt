@@ -1,0 +1,8 @@
+DOD
+- D1 first criterion | PASS | test.sh
+- D2 second criterion | PASS | test.sh
+FINDINGS
+- none
+VERIFY
+- command: bash test.sh | result: green | ok
+VERDICT: PASS

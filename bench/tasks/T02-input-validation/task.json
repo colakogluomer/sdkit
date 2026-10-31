@@ -1,0 +1,84 @@
+{
+  "schema": "tbench-task/1",
+  "id": "T02",
+  "slug": "input-validation",
+  "version": 1,
+  "title": "Input validation and edge cases",
+  "description": "Defective starter; make the behavior in task.md true without changing the tests. python3 stdlib; pure functions.",
+  "difficulty": "low",
+  "risk": "low",
+  "starter": {
+    "repo": "bench/tasks/T02-input-validation/starter",
+    "kind": "local-fixture",
+    "tree": "d5edc89705d2b80e48ca41c71dff9c4e0dfc07ca",
+    "provenance": "Authored for SDKit F05-A (2026-10). No third-party code. The defects are deliberate: see task.md for the required behavior."
+  },
+  "public_test": "python3 -m unittest discover -s tests -p 'test_*.py' -q",
+  "hidden_test": {
+    "command": "python3 -m unittest discover -s hidden_tests -p 'test_*.py' -v",
+    "min_tests": 13,
+    "evaluator_dir": "bench/evaluator/T02-input-validation"
+  },
+  "editable": [
+    "app"
+  ],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "`text` must be a `str`. Anything else (`None`, `int`, `bytes`) is rejected."
+    },
+    {
+      "id": "R2",
+      "text": "The format is exactly `SKU:QTY` with exactly one colon."
+    },
+    {
+      "id": "R3",
+      "text": "SKU is three ASCII capital letters, a hyphen, four ASCII digits (`ABC-1234`). No surrounding whitespace, no trailing newline."
+    },
+    {
+      "id": "R4",
+      "text": "QTY is a decimal number of ASCII digits without sign, whitespace, underscores, or leading zeros, and between 1 and 1000 inclusive."
+    },
+    {
+      "id": "R5",
+      "text": "Valid input returns `{\"sku\": ..., \"qty\": <int>}`."
+    },
+    {
+      "id": "R6",
+      "text": "Lines are separated by commas; every line is validated by `parse_order_line`. Whitespace around a comma is not tolerated."
+    },
+    {
+      "id": "R7",
+      "text": "An empty string, an empty line (including a trailing or doubled comma) is rejected."
+    },
+    {
+      "id": "R8",
+      "text": "At most 20 lines. The same SKU may not appear twice."
+    },
+    {
+      "id": "R9",
+      "text": "A non-`str` input is rejected."
+    }
+  ],
+  "limits": {
+    "agent_timeout_s": 1800,
+    "test_timeout_s": 60,
+    "max_output_bytes": 1048576
+  },
+  "environment": {
+    "python": ">=3.9",
+    "network": false,
+    "commands": [
+      "python3",
+      "git"
+    ]
+  },
+  "reference": {
+    "location": "bench/evaluator/T02-input-validation/variants/reference",
+    "visible_to_agent": false
+  },
+  "checksums": {
+    "visible_sha256": "9cb5ff461c8d2d884cb1893d698f55ae6d3b5212d07a0f017d616a366afccdbe",
+    "evaluator_sha256": "d296c7a023832ddcfade90feeb47a2c4c09b8ebefa0790b40608efa1cf28b52a"
+  }
+}

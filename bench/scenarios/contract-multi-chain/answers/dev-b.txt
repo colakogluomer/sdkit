@@ -1,0 +1,2 @@
+b.sh added.
+HANDOFF-RESULT/1 | id: contract-multi-chain/dev-b | role: developer | status: done | artifacts: b.sh | blockers: none | next: -

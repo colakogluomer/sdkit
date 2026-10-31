@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Code policy (see rules/rn-idioms.md): no debug leftovers, TODOs carry a reference, loose typing is flagged.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+src=(':(glob)**/*.ts' ':(glob)**/*.tsx' ':(glob)**/*.js' ':(glob)**/*.jsx')
+nontest=(':!*.test.*' ':!*.spec.*' ':!**/__tests__/**' ':!**/__mocks__/**' ':!*/node_modules/*' ':!node_modules/*')
+
+added="$(added_lines "${src[@]}" "${nontest[@]}")"
+echo "$added" | grep -nE 'console\.log|(^|[^A-Za-z_])debugger[;[:space:]]*$' && echo "FAIL: console.log/debugger added in non-test code"
+added_lines "${src[@]}" "${nontest[@]}" | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+added_lines "${src[@]}" | grep -nE ':[[:space:]]*any\b|\bas any\b' && echo "WARN: ': any' / 'as any' added (prefer a real type or unknown)"
+
+for f in $VERIFY_CHANGED_SRC; do
+  [ -f "$f" ] || continue
+  grep -q 'FlatList\|FlashList' "$f" && grep -q 'style={{' "$f" && echo "WARN: $f has inline style={{ }} next to a list (hoist to StyleSheet.create)"
+done
+exit 0

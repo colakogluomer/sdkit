@@ -1,0 +1,2 @@
+greet.sh now greets by name.
+HANDOFF-RESULT/1 | id: contract-interrupted/dev-2 | role: developer | status: done | artifacts: greet.sh | blockers: none | next: -

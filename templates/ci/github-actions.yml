@@ -1,0 +1,16 @@
+# spec-driven-kit: server-side gate. Fails a pull request whose code change has no committed attestation for exactly that diff
+# (and, for medium/high risk, no independent verifier PASS). Local hooks can be skipped with --no-verify; this cannot.
+# Keep your own build/test jobs in other workflows. Mark this check as required in the branch protection rules.
+name: spec-driven gate
+on:
+  pull_request:
+jobs:
+  attestation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # the PR branch itself, not the synthetic merge commit: the attestation is bound to the branch's own content
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: VERIFY_BASE="origin/${{ github.base_ref }}" bash __KIT_DIR__/scripts/sdd.sh ci-check

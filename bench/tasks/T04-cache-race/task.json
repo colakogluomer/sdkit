@@ -1,0 +1,72 @@
+{
+  "schema": "tbench-task/1",
+  "id": "T04",
+  "slug": "cache-race",
+  "version": 1,
+  "title": "Concurrent cache race condition",
+  "description": "Defective starter; make the behavior in task.md true without changing the tests. python3 stdlib; threads.",
+  "difficulty": "medium",
+  "risk": "medium",
+  "starter": {
+    "repo": "bench/tasks/T04-cache-race/starter",
+    "kind": "local-fixture",
+    "tree": "8ab417db398f3ab9dd1933ae590c879099610097",
+    "provenance": "Authored for SDKit F05-A (2026-10). No third-party code. The defects are deliberate: see task.md for the required behavior."
+  },
+  "public_test": "python3 -m unittest discover -s tests -p 'test_*.py' -q",
+  "hidden_test": {
+    "command": "python3 -m unittest discover -s hidden_tests -p 'test_*.py' -v",
+    "min_tests": 8,
+    "evaluator_dir": "bench/evaluator/T04-cache-race"
+  },
+  "editable": [
+    "app"
+  ],
+  "requirements": [
+    {
+      "id": "R1",
+      "text": "Single flight: concurrent `get(key)` calls for a key that is not cached run the loader exactly once; every caller receives that value."
+    },
+    {
+      "id": "R2",
+      "text": "No global serialization: loads of different keys run concurrently. A slow load of one key must never block a load of another key."
+    },
+    {
+      "id": "R3",
+      "text": "Errors: if the loader raises, every caller waiting on that load receives that same exception. Nothing is cached; the next `get` calls the loader again."
+    },
+    {
+      "id": "R4",
+      "text": "TTL: an entry is valid while `clock() < stored_at + ttl` (expired exactly at the boundary), using the injected `clock`. An expired entry is reloaded (again single flight)."
+    },
+    {
+      "id": "R5",
+      "text": "`invalidate(key)` removes a cached entry. If a load of that key is in flight, its callers still receive the value, but the value is not stored,"
+    },
+    {
+      "id": "R6",
+      "text": "The cache never returns a value after a failed load of a different key, and a failure of one key does not affect other keys."
+    }
+  ],
+  "limits": {
+    "agent_timeout_s": 1800,
+    "test_timeout_s": 60,
+    "max_output_bytes": 1048576
+  },
+  "environment": {
+    "python": ">=3.9",
+    "network": false,
+    "commands": [
+      "python3",
+      "git"
+    ]
+  },
+  "reference": {
+    "location": "bench/evaluator/T04-cache-race/variants/reference",
+    "visible_to_agent": false
+  },
+  "checksums": {
+    "visible_sha256": "3ab03d02545af1b0797af85b4c6693624d89754a2ee2ccde588d7554f696c840",
+    "evaluator_sha256": "041218a215abde1d600eccc8de173c9cf74b837154eddd1c6a580e4807982f38"
+  }
+}

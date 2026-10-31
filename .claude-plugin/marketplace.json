@@ -1,0 +1,17 @@
+{
+  "name": "spec-driven-kit",
+  "owner": {
+    "name": "wecii"
+  },
+  "metadata": {
+    "description": "Spec-driven development workflow for Claude Code: guard hooks, verifier agents, verify engine."
+  },
+  "plugins": [
+    {
+      "name": "spec-driven-kit",
+      "source": "./",
+      "description": "Spec-driven development workflow with guard hooks, verifier agents and a verify engine.",
+      "version": "1.1.0"
+    }
+  ]
+}

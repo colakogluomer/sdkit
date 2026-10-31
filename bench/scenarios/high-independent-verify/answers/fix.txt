@@ -1,0 +1,1 @@
+The lock is now released on every return path through a RETURN trap.

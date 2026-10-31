@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Contract policy (adapt to your layout): an API route change should carry an OpenAPI spec or contract test update.
+echo "$VERIFY_CHANGED" | grep -qE '(^|/)(app|pages)/api/' || exit 0
+echo "$VERIFY_CHANGED" | grep -E '(^|/)(app|pages)/api/' | grep -qvE '\.(test|spec)\.' || exit 0
+echo "$VERIFY_CHANGED" | grep -qiE '(openapi|swagger)[^/]*\.(ya?ml|json)$|contract.*\.(test|spec)\.|\.contract\.' \
+  || echo "WARN: app/api or pages/api changed but no openapi/swagger spec or contract test did (ignore if no endpoint changed)"
+exit 0

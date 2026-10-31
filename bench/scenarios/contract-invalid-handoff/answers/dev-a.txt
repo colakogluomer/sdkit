@@ -1,0 +1,2 @@
+a.sh added.
+HANDOFF-RESULT/1 | id: contract-invalid-handoff/dev-a | role: developer | status: done | artifacts: a.sh | blockers: none | next: -

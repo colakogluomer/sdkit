@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Code policy (see rules/nextjs-idioms.md): no debug leftovers, no unsafe HTML or `any`, TODOs carry a reference.
+# Protocol: print "FAIL: <message>" or "WARN: <message>" lines; the verify engine counts them.
+. "${VERIFY_LIB:?run this through the verify engine}"
+
+EX=(':!*.test.*' ':!*.spec.*' ':!**/__tests__/**' ':!**/e2e/**')
+added="$(added_lines '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' "${EX[@]}")"
+echo "$added" | grep -nE 'console\.log\(' && echo "FAIL: console.log added (use the project's logger)"
+echo "$added" | grep -nE '\bdebugger\b' && echo "FAIL: debugger statement added"
+echo "$added" | grep -nE 'dangerouslySetInnerHTML' && echo "WARN: dangerouslySetInnerHTML added (sanitise the content or avoid it)"
+echo "$(added_lines '*.ts' '*.tsx' "${EX[@]}")" | grep -nE ':\s*any\b|\bas any\b|<any>' && echo "WARN: 'any' added (use unknown or a real type)"
+added_lines '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' | grep -E 'TODO([^(]|$)' && echo "FAIL: TODO without reference, use TODO(TASK-123)"
+exit 0

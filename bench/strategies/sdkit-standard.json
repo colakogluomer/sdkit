@@ -1,0 +1,13 @@
+{
+  "schema": "tbench-strategy/1",
+  "name": "sdkit-standard",
+  "description": "SDKit spec-driven workflow with the standard profile (sdd.sh start --profile standard). The risk gates of the task's risk class apply unchanged.",
+  "workflow": "sdkit",
+  "profile": "standard",
+  "sdkit": true,
+  "risk_floor": "inherit",
+  "agent_roles": ["developer", "verifier"],
+  "independent_verification": "by risk (medium and high)",
+  "env": {},
+  "same_as_other_strategies": ["model", "provider", "tools", "task_text", "starter_revision", "limits"]
+}
