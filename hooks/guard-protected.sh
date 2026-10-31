@@ -3,7 +3,7 @@
 . "$(dirname "$0")/lib.sh"
 path="$(jget .tool_input.file_path)"
 [ -z "$path" ] && exit 0
-rel="${path#"$PROJECT_DIR"/}"
+if type sdkit_relpath >/dev/null 2>&1; then rel="$(sdkit_relpath "$PROJECT_DIR" "$path")"; else rel="${path#"$PROJECT_DIR"/}"; fi   # ./x, a/../x and // resolve first
 IFS=',' read -r -a protected <<< "${PROTECTED_PATHS:-}"
 for prefix in "${protected[@]}"; do
   [ -n "$prefix" ] && case "$rel" in "$prefix"/*) \

@@ -63,7 +63,8 @@ l_ver="$(lineno '^VERIFY[[:space:]]*$')"; l_verdict="$(lineno '^VERDICT:')"
 [ -n "$l_dod" ] && [ -n "$l_find" ] && [ -n "$l_ver" ] && [ -n "$l_verdict" ] || bad "missing a DOD / FINDINGS / VERIFY / VERDICT marker"
 [ "$l_dod" -lt "$l_find" ] && [ "$l_find" -lt "$l_ver" ] && [ "$l_ver" -lt "$l_verdict" ] || bad "sections are out of order"
 
-section() { printf '%s\n' "$block" | sed -n "$(( $1 + 1 )),$(( $2 - 1 ))p" | grep -E '^[[:space:]]*-' || true; }
+# list items in any bullet style (-, *, 1., 1)) become "- item": the same grammar as the reviewer parser, so a FAIL written as "* ..." still counts
+section() { printf '%s\n' "$block" | sed -n "$(( $1 + 1 )),$(( $2 - 1 ))p" | sed -nE 's/^[[:space:]]*([-*]|[0-9]+[.)])[[:space:]]+/- /p' || true; }
 dod="$(section "$l_dod" "$l_find")"; finds="$(section "$l_find" "$l_ver")"; ver="$(section "$l_ver" "$l_verdict")"
 
 [ -n "$dod" ] || bad "DOD has no items"
@@ -89,11 +90,13 @@ if [ -n "$finds" ]; then
 fi
 [ -n "$ver" ] || bad "VERIFY has no command line"
 printf '%s\n' "$ver" | grep -qE 'result:[[:space:]]*(green|red)' || bad "VERIFY line lacks 'result: green|red'"
+vred=0; printf '%s\n' "$ver" | grep -qE 'result:[[:space:]]*red' && vred=1
 
 verdict="$(printf '%s\n' "$block" | sed -n "${l_verdict}p" | sed -E 's/^VERDICT:[[:space:]]*//; s/[[:space:]]+$//')"
 case "$verdict" in PASS|BLOCK) ;; *) bad "VERDICT must be PASS or BLOCK, got '$verdict'" ;; esac
 expect=PASS; { [ "$fail" -gt 0 ] || [ "$conf" -gt 0 ]; } && expect=BLOCK
 [ "$verdict" = "$expect" ] || bad "VERDICT is $verdict but $fail FAIL item(s) and $conf CONFIRMED finding(s) require $expect"
+[ "$verdict" = PASS ] && [ "$vred" = 1 ] && bad "VERDICT is PASS but a VERIFY command is red"
 
 if [ -n "$proposal" ]; then
   [ -f "$proposal" ] || bad "proposal not found: $proposal"

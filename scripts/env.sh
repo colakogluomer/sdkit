@@ -140,3 +140,34 @@ sdkit_lock() {
   return 0
 }
 sdkit_unlock() { rm -rf "$1.lock" 2>/dev/null; return 0; }
+
+# sdkit_sha256: SHA-256 of stdin as 64 hex characters (shasum, sha256sum or openssl, whichever exists); prints nothing and returns 1 when none does
+sdkit_sha256() {
+  local h
+  if command -v shasum >/dev/null 2>&1; then h="$(shasum -a 256)"
+  elif command -v sha256sum >/dev/null 2>&1; then h="$(sha256sum)"
+  elif command -v openssl >/dev/null 2>&1; then h="$(openssl dgst -sha256 -r)"
+  else return 1; fi
+  h="${h%% *}"; [ "${#h}" = 64 ] || return 1
+  printf '%s\n' "$h"
+}
+
+# sdkit_relpath <root> <path>: <path> relative to <root>, with //, . and .. resolved and symlinks followed where they exist. A path outside
+# <root> is printed absolute. Guards match globs against this, so docs/../src/x.go is src/x.go and .sdkit/./.sdd/state.json is .sdkit/.sdd/state.json.
+sdkit_relpath() {
+  local root="$1" p="$2" s d t i=0 parts=() out=()
+  case "$p" in /*) ;; *) p="$root/$p" ;; esac
+  while :; do
+    out=(); IFS=/ read -r -a parts <<< "$p"
+    for s in ${parts[@]+"${parts[@]}"}; do
+      case "$s" in ''|.) ;; ..) [ "${#out[@]}" -gt 0 ] && unset "out[$(( ${#out[@]} - 1 ))]" ;; *) out+=("$s") ;; esac
+    done
+    p="$(IFS=/; printf '/%s' ${out[@]+"${out[*]}"})"; [ -n "$p" ] || p=/
+    d="${p%/*}"; [ -n "$d" ] || d=/
+    [ -d "$d" ] && d="$(cd "$d" 2>/dev/null && pwd -P)" && p="${d%/}/${p##*/}"
+    i=$((i + 1)); [ -L "$p" ] && [ "$i" -lt 8 ] || break
+    t="$(readlink "$p")"; case "$t" in /*) p="$t" ;; *) p="${d%/}/$t" ;; esac
+  done
+  [ -d "$root" ] && root="$(cd "$root" 2>/dev/null && pwd -P)"
+  case "$p" in "$root") printf '\n' ;; "$root"/*) printf '%s\n' "${p#"$root"/}" ;; *) printf '%s\n' "$p" ;; esac
+}

@@ -1,5 +1,7 @@
 # spec-driven-kit: server-side gate. Fails a merge request whose code change has no committed attestation for exactly that diff
 # (and, for medium/high risk, no independent verifier PASS). Local hooks can be skipped with --no-verify; this cannot.
+# The gate runs the base branch's own sdd.sh (and reads the base branch's settings), so a pull request cannot edit the check that judges it.
+# Protect __KIT_DIR__/ and this CI file with CODEOWNERS: the attestation is a committed file, it proves the flow ran for this diff, not who ran it.
 # Merge this job into your existing .gitlab-ci.yml if you have one. Keep your own build/test jobs next to it.
 # Make it required: Settings > Merge requests > "Pipelines must succeed".
 spec-driven-gate:
@@ -15,4 +17,9 @@ spec-driven-gate:
     # merged-results pipelines check out a merge commit: the attestation is bound to the source branch's own content
     - if [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-}" ]; then git checkout -q "$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA"; fi
     - git fetch -q origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - VERIFY_BASE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" bash __KIT_DIR__/scripts/sdd.sh ci-check
+    - BASE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - |
+      gate="$(mktemp -d)"; mkdir -p "$gate/scripts"
+      if git cat-file -e "$BASE:__KIT_DIR__/scripts/sdd.sh" 2>/dev/null; then for f in sdd.sh env.sh resolve-base.sh; do git show "$BASE:__KIT_DIR__/scripts/$f" > "$gate/scripts/$f" 2>/dev/null || rm -f "$gate/scripts/$f"; done
+      else echo "first adoption: the base branch has no gate yet, running this branch's"; cp __KIT_DIR__/scripts/sdd.sh __KIT_DIR__/scripts/env.sh __KIT_DIR__/scripts/resolve-base.sh "$gate/scripts/"; fi
+      VERIFY_BASE="$BASE" CLAUDE_PROJECT_DIR="$PWD" bash "$gate/scripts/sdd.sh" ci-check

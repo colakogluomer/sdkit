@@ -34,7 +34,7 @@ matches_glob_list() { # <path> <comma globs>
 
 case "${1:-}" in
   pre-commit)
-    staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+    staged="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD)"   # a deletion is a code change too
     frozen=""; [ -f "$top/$KIT_DIR/.frozen" ] && frozen="$(cat "$top/$KIT_DIR/.frozen")"
     while IFS= read -r f; do
       [ -z "$f" ] && continue

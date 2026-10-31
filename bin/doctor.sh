@@ -164,7 +164,7 @@ if [ -d "$TARGET/.githooks" ] && [ ! -x "$TARGET/$KIT_DIR/scripts/guard.sh" ]; t
 fi
 
 # server-side gate: local hooks can be skipped, CI cannot
-if grep -qs "sdd.sh ci-check" "$TARGET/bitbucket-pipelines.yml" "$TARGET"/.github/workflows/*.yml "$TARGET/.gitlab-ci.yml" 2>/dev/null; then
+if grep -qsE 'sdd\.sh"? ci-check' "$TARGET/bitbucket-pipelines.yml" "$TARGET"/.github/workflows/*.yml "$TARGET/.gitlab-ci.yml" 2>/dev/null; then
   ok "CI runs the spec-driven gate (sdd.sh ci-check)"
   [ -x "$TARGET/$KIT_DIR/scripts/sdd.sh" ] || bad "CI calls $KIT_DIR/scripts/sdd.sh but it is missing (run upgrade.sh)"
 else

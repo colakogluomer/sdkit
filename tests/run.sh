@@ -179,9 +179,9 @@ expect "install.sh --status ok" 0 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.
 expect "install.sh --uninstall" 0 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.sh" --uninstall
 expect "install.sh --status fails when unregistered" 1 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.sh" --status
 ci="$tmp/ci-repo"; mkdir -p "$ci"; git -C "$ci" init -q -b main; printf 'module x' > "$ci/go.mod"
-expect "init --ci bitbucket" 0 bash -c "'$ROOT/bin/init.sh' --ci bitbucket '$ci' >/dev/null && grep -q 'sdd.sh ci-check' '$ci/bitbucket-pipelines.yml' && test -x '$ci/.sdkit/scripts/sdd.sh'"
+expect "init --ci bitbucket" 0 bash -c "'$ROOT/bin/init.sh' --ci bitbucket '$ci' >/dev/null && grep -qE 'sdd[.]sh.? ci-check' '$ci/bitbucket-pipelines.yml' && test -x '$ci/.sdkit/scripts/sdd.sh'"
 ci_gl="$tmp/ci-gl"; mkdir -p "$ci_gl"; git -C "$ci_gl" init -q -b main; printf 'module x' > "$ci_gl/go.mod"
-expect "init --ci gitlab" 0 bash -c "'$ROOT/bin/init.sh' --ci gitlab '$ci_gl' >/dev/null && grep -q 'sdd.sh ci-check' '$ci_gl/.gitlab-ci.yml' && grep -q 'CI_MERGE_REQUEST_TARGET_BRANCH_NAME' '$ci_gl/.gitlab-ci.yml' && ! grep -q '__KIT_DIR__' '$ci_gl/.gitlab-ci.yml'"
+expect "init --ci gitlab" 0 bash -c "'$ROOT/bin/init.sh' --ci gitlab '$ci_gl' >/dev/null && grep -qE 'sdd[.]sh.? ci-check' '$ci_gl/.gitlab-ci.yml' && grep -q 'CI_MERGE_REQUEST_TARGET_BRANCH_NAME' '$ci_gl/.gitlab-ci.yml' && ! grep -q '__KIT_DIR__' '$ci_gl/.gitlab-ci.yml'"
 expect "the CI gate's env.sh is not git-ignored" 1 git -C "$ci_gl" check-ignore -q .sdkit/scripts/env.sh
 expect "doctor sees the GitLab CI gate" 0 bash -c "'$ROOT/bin/doctor.sh' '$ci_gl' 2>&1 | grep -q 'CI runs the spec-driven gate'"
 expect "init --ci rejects unknown hosts" 2 "$ROOT/bin/init.sh" --ci svn "$ci"

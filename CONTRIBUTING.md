@@ -52,6 +52,7 @@ tests/hardening.test.sh                                            # F00.5: verd
 tests/workflow.test.sh                                             # F03: profiles, transition table, refusal reasons, contract policy, concurrency, telemetry
 tests/evidence.test.sh                                             # F04: high-risk evidence (3 roles), trust/identity, staleness, forgery, concurrency, adapter claims
 tests/contract.test.sh                                             # F02: agent contracts (validation, recording, hook, run-role, verifier independence, backward compatibility, contract benchmarks)
+tests/security.test.sh                                             # review findings: trusted CI gate, fail-closed fingerprint, RED/GREEN binding, path normalisation, guard-pr bypasses
 tests/route.test.sh                                               # F06: routing decisions, registry, scheduling, retry/escalation, budget, run-role integration (fake CLI; no model call)
 tests/tbench.test.sh                                               # F05-A: task benchmark (task registry, isolation, hidden test separation, metric ingestion, seal, report, real-run gate; no model call)
 tests/telemetry.test.sh                                            # F01: event schema, correlation, concurrency, failure isolation, benchmark (simulated; no real LLM run)

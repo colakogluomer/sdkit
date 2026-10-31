@@ -14,6 +14,9 @@ eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', wanted '$3')"; 
 ksum() { (cd "$KIT" && find scripts hooks core agents adapters skills bin tests/run.sh -type f | sort | xargs shasum | shasum | cut -d' ' -f1); }
 KSUM0="$(ksum)"
 SDD="$KIT/scripts/sdd.sh"; WF="$KIT/scripts/workflow.sh"; PV="$KIT/scripts/parse-verdict.sh"; RR="$KIT/scripts/run-role.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 export VERIFY_BASE=main
 
 newrepo() {  # newrepo <name> [extra sdkit.env lines]
@@ -33,7 +36,7 @@ last_reason() { jq -r 'select(.type=="phase.reject") | .reason // "none"' "$EV" 
 # green <risk> [profile]: a task in phase green on a changed file
 green() {
   "$SDD" start t1 --risk "$1" ${2:+--profile "$2"} --proposal openspec/changes/t1/proposal.md >/dev/null && "$SDD" advance proposed >/dev/null \
-    && "$SDD" advance red --test-cmd false >/dev/null && echo "x$RANDOM" >> src/a.sh && "$SDD" advance green --test-cmd true >/dev/null
+    && sdd_red >/dev/null && echo "x$RANDOM" >> src/a.sh && sdd_green >/dev/null
 }
 
 # the four answers a role can give

@@ -80,7 +80,7 @@ Independent tasks can run in parallel subagents in separate worktrees. One-page 
 | Phase gate | `scripts/sdd.sh gate`, the single decision point | code changes before a proposal and a failing test; push/PR before verification; any edit after verification (the verdict goes stale) |
 | Agent hooks | Claude Code (full set), Gemini/Cursor/OpenCode (adapters) | the above per tool call, plus secrets, protected paths, frozen tests, prod `kubectl`, release-flow git mistakes |
 | Git hooks | `.githooks/`, every tool | the same gate at commit and push time |
-| CI | `sdkit init --ci ...` | a PR whose code change has no committed attestation for exactly that diff; medium/high also need a verifier PASS |
+| CI | `sdkit init --ci ...` | a PR whose code change has no committed attestation for exactly that diff; medium/high also need a verifier PASS. The job runs the **base branch's** `sdd.sh` and settings, so a PR cannot edit the check that judges it |
 
 `SDD_MODE` in `sdkit.env` (override it in `sdkit.local.env`): `strict` (default) denies, `guided` asks or warns, `off` disables. Git hooks can be skipped with `--no-verify`;
 CI cannot, so mark the CI check as required. Details and limits: [docs/guide.md](docs/guide.md).
@@ -133,7 +133,8 @@ To adapt a role, write `.sdkit/roles.d/<role>.md`. `sdkit sync --check` and `sdk
 
 ## Limits
 
-- Guards are regex-based safety nets, not a security boundary; the attestation files vouch for your own team's rules, so protect `attestations/` with code review.
+- Guards are regex-based safety nets, not a security boundary. They keep a cooperative agent on the workflow; an agent that tries to get around them can (Bash writes are not phase-gated, and a regex over a command string can be dodged).
+- An attestation is a JSON file the author commits: `ci-check` proves the flow was run for exactly this diff, not who ran it or that the verifier was independent. Protect `.sdkit/`, `attestations/` and the CI file with CODEOWNERS and review them like code.
 - One stack per repo. Windows is not supported (the kit is bash).
 - `spec-driven-dev` drives the OpenSpec skills, so the `openspec` CLI is required.
 

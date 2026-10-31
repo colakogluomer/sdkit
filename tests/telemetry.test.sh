@@ -128,14 +128,17 @@ echo "the phase machine, state.sh and the gate emit events"
 P="$(newrepo phases)"; mkdir -p "$P/openspec/changes/x"; printf '# P\n## Definition of Done\n- D1: a | Verified by: t\n' > "$P/openspec/changes/x/proposal.md"
 cd "$P" || exit 1; export CLAUDE_PROJECT_DIR="$P" VERIFY_BASE=main
 SDD="$KIT/scripts/sdd.sh"; ST="$KIT/scripts/state.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 "$ST" x init medium feat >/dev/null
 "$SDD" start x --risk medium --proposal openspec/changes/x/proposal.md >/dev/null
-"$SDD" advance red --test-cmd false >/dev/null 2>&1                 # skipping a phase: refused
+sdd_red >/dev/null 2>&1                 # skipping a phase: refused
 "$SDD" gate edit src/app.go >/dev/null 2>&1                          # code edit in intake: refused
 "$SDD" advance proposed >/dev/null
 "$SDD" advance red --test-cmd true >/dev/null 2>&1                   # passing test is not red: refused
-"$SDD" advance red --test-cmd false >/dev/null
-echo ok > src.txt; "$SDD" advance green --test-cmd true >/dev/null
+sdd_red >/dev/null
+echo ok > src.txt; sdd_green >/dev/null
 "$ST" x retry T1 >/dev/null; "$ST" x retry T1 >/dev/null 2>&1
 printf 'DOD\n- D1 a | PASS | t\nFINDINGS\n- none\nVERIFY\n- command: v | result: green | ok\nVERDICT: PASS\n' | "$KIT/scripts/parse-verdict.sh" - --proposal openspec/changes/x/proposal.md --record >/dev/null
 "$SDD" advance verified >/dev/null; "$SDD" advance pr >/dev/null; "$SDD" advance done >/dev/null
@@ -162,7 +165,7 @@ echo "backward compatibility"
 B="$(newrepo compat)"; sed -i.bak '/TELEMETRY/d' "$B/.sdkit/sdkit.local.env"; rm -f "$B/.sdkit/sdkit.local.env.bak"; mkdir -p "$B/openspec/changes/x"
 printf '# P\n## Definition of Done\n- D1: a | Verified by: t\n' > "$B/openspec/changes/x/proposal.md"
 cd "$B" || exit 1; export CLAUDE_PROJECT_DIR="$B" VERIFY_BASE=main
-"$ST" x init low feat >/dev/null; "$SDD" start x --risk low --proposal openspec/changes/x/proposal.md >/dev/null; "$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null
+"$ST" x init low feat >/dev/null; "$SDD" start x --risk low --proposal openspec/changes/x/proposal.md >/dev/null; "$SDD" advance proposed >/dev/null; sdd_red >/dev/null
 check "a repo without TELEMETRY writes no events file" test ! -e "$(ev "$B" x)"
 check "state.sh retry unchanged"                       "$ST" x retry T1
 nocheck "state.sh second retry unchanged"              "$ST" x retry T1
