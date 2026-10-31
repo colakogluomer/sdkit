@@ -1,209 +1,209 @@
-# Yapılandırılmış ajan sözleşmeleri ve güvenilir devirler (F02)
+# Structured agent contracts and trusted handoffs (F02)
 
-Durum: **uygulandı**, 1.1.0 üzerinde, F00/F00.5/F01 değişikliklerinin üstüne; sürüm artırılmadı. Bu belge F02'nin spec'i, tasarımı, görev listesi ve doğrulama kaydıdır. Amaç: bir ajana verilen iş (devir) ve ajanın döndürdüğü cevap, **makinenin doğrulayabileceği** kadar yapılandırılsın; ama ajanlar için ek bağlam, ek ajan çağrısı ya da çift durum yaratılmasın. İlke: *makinenin garanti istediği yerde yapılandırılmış, ajanın bağlam istediği yerde kısa.*
+Status: **implemented**, on 1.1.0, on top of the F00/F00.5/F01 changes; the version was not bumped. This document is F02's spec, design, task list and verification record. Goal: the work given to an agent (the handoff) and the answer the agent returns should be structured as far as **the machine can verify**, but without creating extra context, extra agent calls or duplicate state for the agents. Principle: *structured where the machine needs a guarantee, short where the agent needs context.*
 
-Bu sürüm hiçbir token veya maliyet tasarrufu iddiası taşımaz: simüle benchmark yalnızca **baytları, olayları ve betik çağrılarını** ölçer (bölüm 7); token etkisi gerçek koşuyla (`--real`, kullanıcı onayı) ölçülmeden söylenemez ve ölçülmedi.
+This release makes no token or cost savings claim: the simulated benchmark measures only **bytes, events and script calls** (section 7); the token impact cannot be stated until it is measured with a real run (`--real`, user approval), and it was not measured.
 
 ## 1. Spec
 
-Kapsam: sürümlü bir devir sözleşmesi (çağrı + sonuç), onu doğrulayan tek betik (`scripts/contract.sh`), desteklenen sınırlara takılması (Claude Code hook'u, `run-role.sh`), F01 telemetrisine `contract.check` olayı, sözleşmeli benchmark fikstürleri, testler.
-Kapsam dışı (bilerek): ajan davranışı, model yönlendirme, risk politikası ve faz makinesi değişikliği; ek ajan/LLM ile doğrulama; JSON şema kütüphanesi ya da dış servis; Cursor/Gemini/OpenCode/Codex için canlı doğrulanmamış hook iddiası.
+Scope: a versioned handoff contract (call + result), a single script that validates it (`scripts/contract.sh`), hooking it into the supported boundaries (Claude Code hook, `run-role.sh`), a `contract.check` event in F01 telemetry, contract benchmark fixtures, tests.
+Out of scope (deliberately): changes to agent behaviour, model routing, risk policy or the phase machine; validation by an extra agent/LLM; a JSON schema library or an external service; hook claims for Cursor/Gemini/OpenCode/Codex that are not verified live.
 
-Kabul ölçütleri (DoD) ve kanıtı (`tests/contract.test.sh`, 197 durum, hepsi geçti; bölüm 8):
+Acceptance criteria (DoD) and their evidence (`tests/contract.test.sh`, 197 cases, all pass; section 8):
 
-| # | Ölçüt | Kanıt bölümü (test) |
+| # | Criterion | Evidence section (test) |
 |---|---|---|
-| D1 | Sözleşme sürümlü ve belgeli (`CONTRACT: 1`, `HANDOFF-RESULT/1`); desteklenmeyen sürüm reddedilir | "malformed output", "handoff validation" |
-| D2 | Desteklenen sınırlar (Claude hook'u, `run-role.sh`, elle `contract.sh`) sözleşmeyi deterministik doğrular | "the Claude Code hook", "run-role.sh" |
-| D3 | Bozuk/tutarsız sözleşme geçerli sayılamaz: bozuk JSON/düzyazı, eksik alan, bilinmeyen/çift alan, rol, görev, kimlik, güvensiz yol, eksik artefakt, kapsam dışı | "malformed output", "identity", "artifacts of a result" |
-| D4 | Ajanın bildirdiği başarı bağımsız doğrulamayı atlatamaz: geçerli sözleşme faz geçişi vermez, verdict kaydetmez | "the verifier stays independent" |
-| D5 | Mevcut kapılar sağlam: `sdd.sh`, `parse-verdict.sh`, `record-verdict.sh` sözleşmeyi bilmez | aynı bölüm (`grep` testleri) + mevcut paketler değişmedi |
-| D6 | Telemetri sözleşme sonuçlarını kaydeder (geçerli/geçersiz, sürüm, rol, kimlik, durum, kategori, boyut); ikinci defter yok; kayıp veri 0 sayılmaz | "telemetry" |
-| D7 | Benchmark fikstürleri tekrarlanabilir; F01 taban çizgisi bit bit aynı | "contract benchmarks" + bölüm 7 |
-| D8 | Geriye uyumluluk: `CONTRACT:` satırı olmayan devir/cevap eskisi gibi; varsayılan kapalı | "backward compatibility" |
-| D9 | Host sınırlamaları belgeli (bölüm 5) | bu belge, `references/hosts.md` |
+| D1 | The contract is versioned and documented (`CONTRACT: 1`, `HANDOFF-RESULT/1`); an unsupported version is refused | "malformed output", "handoff validation" |
+| D2 | The supported boundaries (Claude hook, `run-role.sh`, `contract.sh` by hand) validate the contract deterministically | "the Claude Code hook", "run-role.sh" |
+| D3 | A broken/inconsistent contract can never count as valid: broken JSON/prose, missing field, unknown/duplicate field, role, task, ID, unsafe path, missing artifact, out of scope | "malformed output", "identity", "artifacts of a result" |
+| D4 | Success reported by the agent cannot bypass independent verification: a valid contract grants no phase transition and records no verdict | "the verifier stays independent" |
+| D5 | Existing gates stay intact: `sdd.sh`, `parse-verdict.sh` and `record-verdict.sh` do not know about the contract | same section (`grep` tests) + existing suites unchanged |
+| D6 | Telemetry records contract results (valid/invalid, version, role, ID, status, category, size); no second ledger; missing data is not counted as 0 | "telemetry" |
+| D7 | Benchmark fixtures are reproducible; the F01 baseline is bit-for-bit identical | "contract benchmarks" + section 7 |
+| D8 | Backward compatibility: a handoff/answer without a `CONTRACT:` line works as before; off by default | "backward compatibility" |
+| D9 | Host limitations are documented (section 5) | this document, `references/hosts.md` |
 
-## 2. Mevcut yeteneklerin yeniden kullanımı (F00/F01'e göre)
+## 2. Reuse of existing capabilities (relative to F00/F01)
 
-| Mevcut sınır | F02'de |
+| Existing boundary | In F02 |
 |---|---|
-| `references/handoff.md` (ROLE, TASK, READ, SCOPE, OUT, DONE WHEN, ...) | **Çağrı sözleşmesi zaten budur.** Yeni bir şema/dosya yok: yalnızca `CONTRACT: 1`, `ID:`, sabit `REPLY-END:` (ve gerekirse `RETRY-OF:`) satırları eklenir; mevcut satırlar doğrulanır |
-| `parse-verdict.sh` + `record-verdict.sh` (verifier bloğu) | **Dokunulmadı.** Verdict'in tek otoritesi. Sözleşme yalnızca zarfı (kimlik/rol/durum) doğrular, DOD/VERDICT'e bakmaz |
-| `sdd.sh` (faz, kapı, verdict bağlama) | **Dokunulmadı.** `contract` kelimesi bu dosyada geçmez (test) |
-| `state.sh retry` (tek yeniden deneme) | Geçersiz/yarım kalan sözleşme için de aynı tek hak; ikinci yeniden deneme kullanıcıya gider |
-| `check-writes.sh` (kapsam: dosya veya dizin önekleri) | Aynı önek kuralı artefakt kapsamı için (`in_scope`); gerçek yazma denetimi hâlâ `check-writes.sh`/git hook'larında |
-| `telemetry.sh` (`events.jsonl`, `q` kalite etiketi, hata kategorileri) | Yeni olay türü `contract.check` + `failure/contract`; aynı dosya, aynı `errs` şeması |
-| `run-role.sh` (ayrı süreç yürütme noktası) | Sözleşmeli devirde çağrı öncesi `issue`, sonrası `check-result`; host hatasında `close` |
-| `hooks/guard-budget.sh` (PreToolUse Agent) | Aynı eşleyici grubuna `check-contract.sh` eklendi; ayrı bir mekanizma değil |
-| `bench/` | Yeni senaryolar aynı sürücüde; `--contracts` ve `overhead` komutları |
+| `references/handoff.md` (ROLE, TASK, READ, SCOPE, OUT, DONE WHEN, ...) | **This already is the call contract.** No new schema/file: only the `CONTRACT: 1`, `ID:` and fixed `REPLY-END:` lines (and `RETRY-OF:` when needed) are added; the existing lines are validated |
+| `parse-verdict.sh` + `record-verdict.sh` (verifier block) | **Untouched.** The single authority on the verdict. The contract validates only the envelope (identity/role/status) and does not look at DOD/VERDICT |
+| `sdd.sh` (phase, gate, verdict binding) | **Untouched.** The word `contract` does not appear in this file (test) |
+| `state.sh retry` (single retry) | The same single chance applies to an invalid/incomplete contract; a second retry goes to the user |
+| `check-writes.sh` (scope: file or directory prefixes) | The same prefix rule for artifact scope (`in_scope`); the real write check is still in `check-writes.sh`/git hooks |
+| `telemetry.sh` (`events.jsonl`, `q` quality label, failure categories) | New event type `contract.check` + `failure/contract`; same file, same `errs` schema |
+| `run-role.sh` (separate-process execution point) | On a contracted handoff, `issue` before the call and `check-result` after; `close` on a host error |
+| `hooks/guard-budget.sh` (PreToolUse Agent) | `check-contract.sh` was added to the same matcher group; not a separate mechanism |
+| `bench/` | New scenarios in the same driver; `--contracts` and `overhead` commands |
 
-Yeni durum dosyası yok; yalnızca `work/<slug>/contracts/<etiket>.json` (kimlik başına bir küçük kayıt: rol, kapsam, durum). Bu, başka hiçbir yerde tutulmayan "bu devir verildi mi, cevaplandı mı" bilgisidir; git durumu, SDD fazı, token verisi ya da doğrulama kanıtı **kopyalanmaz**.
+No new state file; only `work/<slug>/contracts/<label>.json` (one small record per ID: role, scope, status). This is the "was this handoff issued, was it answered" information, which is kept nowhere else; git state, the SDD phase, token data and verification evidence are **not copied**.
 
-## 3. Tasarım
+## 3. Design
 
-### 3.1 Biçim seçimi: üç aday
+### 3.1 Choice of format: three candidates
 
-| Aday | Güvence | Uyumluluk | Maliyet | Karar |
+| Candidate | Assurance | Compatibility | Cost | Decision |
 |---|---|---|---|---|
-| JSON sonuç **dosyası** (`out/<id>.result.json`) | yüksek | **zayıf**: salt okunur roller dosya yazamaz (reviewer, verifier, scout); ek araç çağrısı | ek yazma + okuma | Reddedildi: en güvenilir kanal olan cevap metnini bırakıyor |
-| Cevap içinde JSON yükü | yüksek | iyi | kaçış karakterleri, çok satır; LLM'in JSON sözdizimi hatası riski; düzyazı okunurluğu bozulur | Reddedildi |
-| **Tek satırlık işaretçi** (`HANDOFF-RESULT/1 \| key: value ...`) | yeterli (sabit alanlar, katı ayrıştırma) | **en iyi**: her host'ta ve `last_assistant_message`'ta bulunan son metin | ~120 bayt | **Seçildi**: insan okur, `awk`/bash ayrıştırır, jq gerekmez |
+| JSON result **file** (`out/<id>.result.json`) | high | **weak**: read-only roles cannot write files (reviewer, verifier, scout); extra tool call | extra write + read | Rejected: it abandons the most reliable channel, the answer text |
+| JSON payload inside the answer | high | good | escape characters, multiple lines; risk of LLM JSON syntax errors; hurts prose readability | Rejected |
+| **One-line marker** (`HANDOFF-RESULT/1 \| key: value ...`) | sufficient (fixed fields, strict parsing) | **best**: the final text, present on every host and in `last_assistant_message` | ~120 bytes | **Chosen**: humans can read it, `awk`/bash parse it, no jq needed |
 
-Mevcut `parse-verdict.sh` de aynı yaklaşımın (metin bloğu + katı ayrıştırıcı) kanıtlanmış hâlidir.
+The existing `parse-verdict.sh` is the proven form of the same approach (text block + strict parser).
 
-### 3.2 Çağrı sözleşmesi
+### 3.2 Call contract
 
 ```
 ROLE: developer     RISK: medium     PROJECT-DIR: .sdkit
 CONTRACT: 1
-TASK: ...                         # amaç
-READ: plan.md,src/a.sh            # girdiler: var olan, depo-göreli yollar (virgüllü, düzyazı yok)
-SCOPE: writes: src/,docs/x.md     # izinli yazma kapsamı; salt okunur roller için `none`
-OUT: work/t1/out/dev-a.md         # beklenen çıktı (work/<görev>/out/ altında)
-ID: t1/dev-a                      # <görev>/<etiket>: koşu kimliği
+TASK: ...                         # goal
+READ: plan.md,src/a.sh            # inputs: existing, repo-relative paths (comma-separated, no prose)
+SCOPE: writes: src/,docs/x.md     # allowed write scope; `none` for read-only roles
+OUT: work/t1/out/dev-a.md         # expected output (under work/<task>/out/)
+ID: t1/dev-a                      # <task>/<label>: run ID
 REPLY-END: one line "HANDOFF-RESULT/1 | id: <ID> | role: <ROLE> | status: ... | artifacts: ... | blockers: ... | next: ..."
-RETRY-OF: t1/dev-a                # yalnızca yeniden denemede
+RETRY-OF: t1/dev-a                # only on a retry
 ```
-`CONTRACT:` sabit satırdır (önbellek öneki), `ID:` her açılışta değişir (en sonlara yakın). Görev kimliği = `ID`'nin ilk parçası (aktif görevle karşılaştırılır), koşu kimliği telemetride otomatik (`run`). Kısıtlar `DONE WHEN` / `NOT YOUR JOB` satırlarında düzyazı kalır: makine onları doğrulamaz, ajan okur.
+`CONTRACT:` is a fixed line (cache prefix); `ID:` changes on every issue (close to the end). Task ID = the first part of `ID` (compared with the active task); the run ID is added automatically in telemetry (`run`). Constraints stay as prose in the `DONE WHEN` / `NOT YOUR JOB` lines: the machine does not validate them, the agent reads them.
 
-### 3.3 Sonuç sözleşmesi
+### 3.3 Result contract
 
 `HANDOFF-RESULT/1 | id: t1/dev-a | role: developer | status: done | artifacts: src/a.sh | blockers: none | next: -`
 
-| Alan | Kural |
+| Field | Rule |
 |---|---|
-| sürüm | `/1`; sayı değilse `malformed`, başka sayıysa `unsupported-version` |
-| `id`, `role`, `status`, `artifacts`, `blockers` | zorunlu, boş olamaz (`none` yazılır); `next` isteğe bağlı |
-| `status` | `done` `partial` `blocked` `failed` (**"verified" diye bir durum yoktur**) |
-| tutarlılık | `done` ⇔ `blockers: none`; `partial/blocked/failed` blocker ister |
-| `artifacts` | `none` ya da virgüllü yollar: güvenli, var olan, `writes:` (veya `OUT`) içinde; salt okunur rol `none` demek zorunda |
-| uzunluk/karakter | `blockers`/`next` ≤ 200; değer içinde `\|` olmaz; bilinmeyen veya çift alan reddedilir |
-| tek satır | cevapta tek (farklı) işaretçi; birden fazla farklı satır belirsizdir |
+| version | `/1`; `malformed` if it is not a number, `unsupported-version` if it is another number |
+| `id`, `role`, `status`, `artifacts`, `blockers` | required, cannot be empty (write `none`); `next` is optional |
+| `status` | `done` `partial` `blocked` `failed` (**there is no "verified" status**) |
+| consistency | `done` ⇔ `blockers: none`; `partial/blocked/failed` require a blocker |
+| `artifacts` | `none` or comma-separated paths: safe, existing, within `writes:` (or `OUT`); a read-only role must say `none` |
+| length/characters | `blockers`/`next` ≤ 200; no `\|` inside a value; unknown or duplicate fields are refused |
+| single line | one (distinct) marker per answer; more than one distinct line is ambiguous |
 
-### 3.4 Doğrulama kategorileri
+### 3.4 Validation categories
 
-`no-result` `malformed` `unsupported-version` `missing-field` `bad-value` `inconsistent` `id-mismatch` `role-mismatch` `task-mismatch` `unknown-id` `duplicate` `stale` `unsafe-path` `missing-artifact` `out-of-scope`. Çıktı tek satır: `CONTRACT=valid|invalid stage=handoff|result id=.. role=.. [status=..] [reason=..: ayrıntı]`.
-Çıkış kodu (`parse-verdict.sh` ile aynı üçlü): **0** geçerli ve `done`, **1** geçerli ama `partial/blocked/failed`, **2** geçersiz. Çıkış 0 asla "doğrulandı" demek değildir.
+`no-result` `malformed` `unsupported-version` `missing-field` `bad-value` `inconsistent` `id-mismatch` `role-mismatch` `task-mismatch` `unknown-id` `duplicate` `stale` `unsafe-path` `missing-artifact` `out-of-scope`. The output is one line: `CONTRACT=valid|invalid stage=handoff|result id=.. role=.. [status=..] [reason=..: detail]`.
+Exit code (the same triple as `parse-verdict.sh`): **0** valid and `done`, **1** valid but `partial/blocked/failed`, **2** invalid. Exit 0 never means "verified".
 
-### 3.5 Kayıt ve yaşam döngüsü
+### 3.5 Record and lifecycle
 
-`issue` kimliği `work/<slug>/contracts/<etiket>.json` olarak kaydeder (dışlayıcı oluşturma: aynı kimlik iki kez verilemez). Durumlar: `issued → accepted` | `invalid` (yeniden gönderilebilir) | `superseded` (`RETRY-OF` ile yenisi verildi) | `interrupted` (`close`). Aynı kimliğe ikinci geçerli cevap `duplicate`; yerine geçilmiş/ölü kimliğe geç gelen cevap `stale`; hiç verilmemiş kimlik `unknown-id`. Kabul, kilit altında "kontrol et ve yaz" olduğundan sekiz eşzamanlı özdeş cevaptan tam biri kabul edilir (test).
+`issue` records the ID as `work/<slug>/contracts/<label>.json` (exclusive create: the same ID cannot be issued twice). States: `issued → accepted` | `invalid` (can be resubmitted) | `superseded` (a new one was issued with `RETRY-OF`) | `interrupted` (`close`). A second valid answer to the same ID is `duplicate`; a late answer to a superseded/dead ID is `stale`; an ID that was never issued is `unknown-id`. Since acceptance is a "check and write" under a lock, exactly one of eight concurrent identical answers is accepted (test).
 
-### 3.6 Doğrulama bağımsızlığı (D4/D5)
+### 3.6 Verification independence (D4/D5)
 
-Dört kavram ayrı kalır ve ayrı yerde tutulur:
+Four concepts stay separate and are kept in separate places:
 
-| Kavram | Nerede | Sözleşme ile ilişkisi |
+| Concept | Where | Relation to the contract |
 |---|---|---|
-| Sözleşme geçerliliği | `contract.sh` (bu özellik) | yalnızca zarf: biçim, kimlik, rol, yol |
-| Yürütme sonucu | sonuç satırındaki `status` | ajanın beyanı; kanıt değil |
-| Test kanıtı | `sdd.sh advance red/green --test-cmd` (kendisi çalıştırır) | dokunulmadı |
-| Bağımsız doğrulama | `parse-verdict.sh` / `record-verdict.sh` / `sdd.sh advance verified` | dokunulmadı; sözleşme olmadan da verdict kaydedilir, sözleşme geçerli olsa da verdict gerekir |
-| İş akışı tamamlanması | `sdd.sh` fazları | `contract.sh` faz makinesini, `_verdict`'i, `parse-verdict`'i çağırmaz (test) |
+| Contract validity | `contract.sh` (this feature) | only the envelope: format, identity, role, path |
+| Execution result | `status` in the result line | the agent's claim; not evidence |
+| Test evidence | `sdd.sh advance red/green --test-cmd` (runs the tests itself) | untouched |
+| Independent verification | `parse-verdict.sh` / `record-verdict.sh` / `sdd.sh advance verified` | untouched; a verdict is recorded without a contract too, and a verdict is required even when the contract is valid |
+| Workflow completion | `sdd.sh` phases | `contract.sh` does not call the phase machine, `_verdict` or `parse-verdict` (test) |
 
-`next:` yalnızca öneri metnidir; hiçbir betik onu çalıştırmaz.
+`next:` is only suggestion text; no script runs it.
 
-## 4. Sınırlar ve entegrasyon
+## 4. Boundaries and integration
 
-| Sınır | Ne yapar | Engeller mi? |
+| Boundary | What it does | Does it block? |
 |---|---|---|
-| `hooks/check-contract.sh`, PreToolUse `Agent\|Task` (Claude Code) | `tool_input.prompt` içinde `CONTRACT:` varsa `contract.sh issue` (doğrula + kaydet). Geçersizse `strict`'te **ask**, `guided`'da uyarı, `off`'ta sessiz | yalnızca `ask`; hook hatası asla engellemez |
-| `hooks/check-contract.sh`, SubagentStop (Claude Code) | Son mesajı (yoksa transkriptin son metnini) `check-result --record --legacy-ok` ile doğrular; geçersizse orkestratöre `systemMessage` | hayır; verdict yolundan bağımsız |
-| `scripts/run-role.sh` (her host) | `CONTRACT:` varsa çağrıdan önce `issue` (geçersiz: çıkış 2, **ajan başlatılmaz**, bütçe sayılmaz), sonra `check-result`; cevap yine yazdırılır/saklanır. Çıkış 4: sözleşme bozuk, 5: geçerli ama `partial/blocked/failed`; host hatasında `close` | evet (çıkış kodu) |
-| Elle `contract.sh issue / check-result / pending / close / status` | Hook'u olmayan host'ların orkestratörü için | — |
+| `hooks/check-contract.sh`, PreToolUse `Agent\|Task` (Claude Code) | If `tool_input.prompt` contains `CONTRACT:`, runs `contract.sh issue` (validate + record). If invalid: **ask** in `strict`, a warning in `guided`, silent in `off` | only `ask`; a hook error never blocks |
+| `hooks/check-contract.sh`, SubagentStop (Claude Code) | Validates the last message (otherwise the last text of the transcript) with `check-result --record --legacy-ok`; if invalid, a `systemMessage` to the orchestrator | no; independent of the verdict path |
+| `scripts/run-role.sh` (any host) | If `CONTRACT:` is present, `issue` before the call (invalid: exit 2, **the agent is not started**, the budget is not counted), then `check-result`; the answer is still printed/stored. Exit 4: broken contract, 5: valid but `partial/blocked/failed`; `close` on a host error | yes (exit code) |
+| `contract.sh issue / check-result / pending / close / status` by hand | For the orchestrator on hosts without hooks | — |
 
-Kapalıyken (`CONTRACTS` boş, `CONTRACT:` satırı yok) hiçbiri bir şey yapmaz; `run-role.sh` istemi bayt bayt aynıdır (ek cümle yalnızca sözleşmeli devirde, test).
+When it is off (`CONTRACTS` empty, no `CONTRACT:` line), none of these does anything; the `run-role.sh` prompt is byte-for-byte identical (the extra sentence appears only on a contracted handoff, test).
 
-### Claude Code hakkında araştırma bulguları (hiçbiri uydurulmadı)
+### Research findings about Claude Code (none of them made up)
 
-- `Agent` aracının girdisi gerçek transkriptlerde `{description, prompt, subagent_type}` olarak görüldü; PreToolUse hook'u devri (`prompt`) bu yüzden görebilir.
-- Repoda ve elimdeki transkriptlerde PreToolUse(`Agent`) ile SubagentStop'u **bağlayan ortak bir kimlik görülmedi** (SubagentStop'ta `agent_id`, `agent_type`, `last_assistant_message`, `agent_transcript_path` var; PreToolUse'ta `tool_use_id`). Bu yüzden eşleşme host üstverisine değil, **devirdeki `ID:` ve cevaptaki `id:`** ile kurulur. Cevapta işaretçi yoksa hook yalnızca o rol için bekleyen (`issued`) devir varsa bunu bulgu sayar; yoksa eski (sözleşmesiz) çağrıdır ve sessiz kalır. Aynı roldeki eşzamanlı sözleşmeli ve sözleşmesiz ajanlar bu durumda yanlış uyarı üretebilir (yalnızca uyarı).
-- Alt ajan transkriptinin ilk kullanıcı mesajından `ID:` okunabilir mi? **Doğrulanamadı** (elimde alt ajan transkripti yok); kullanılmadı.
-- SubagentStop hook'unun alan adları repodaki mevcut hook'larla (`record-verdict.sh`, `usage-log.sh`) aynı varsayımlara dayanır; **canlı Claude Code oturumunda bu F02 hook'u koşturulmadı**, testler hook'u örnek JSON ile besler.
+- The `Agent` tool's input was seen as `{description, prompt, subagent_type}` in real transcripts; so the PreToolUse hook can see the handoff (`prompt`).
+- In the repo and in the transcripts at hand, **no shared ID linking** PreToolUse(`Agent`) and SubagentStop was seen (SubagentStop has `agent_id`, `agent_type`, `last_assistant_message`, `agent_transcript_path`; PreToolUse has `tool_use_id`). So the match is made not through host metadata but through **`ID:` in the handoff and `id:` in the answer**. If the answer has no marker, the hook counts it as a finding only if there is a pending (`issued`) handoff for that role; otherwise it is an old (uncontracted) call and the hook stays silent. Concurrent contracted and uncontracted agents in the same role can produce a false warning in this case (warning only).
+- Can the `ID:` be read from the first user message of the subagent transcript? **Could not be verified** (no subagent transcript at hand); not used.
+- The SubagentStop hook's field names rely on the same assumptions as the existing hooks in the repo (`record-verdict.sh`, `usage-log.sh`); **this F02 hook was not run in a live Claude Code session**, and the tests feed the hook sample JSON.
 
-## 5. Host uyumluluk durumu
+## 5. Host compatibility status
 
-| Host | Çağrı doğrulaması | Cevap doğrulaması | Durum |
+| Host | Call validation | Answer validation | Status |
 |---|---|---|---|
-| Claude Code, `Agent` aracı | PreToolUse hook (`check-contract.sh`) | SubagentStop hook | Örnek hook JSON'uyla test edildi; **canlı doğrulanmadı** |
-| Claude Code, `run-role.sh --host claude` | `run-role.sh` | `run-role.sh` (`result` JSON'undan) | Stub host ile test edildi; canlı CLI yok |
-| Codex, OpenCode, Cursor, Gemini — `run-role.sh` | `run-role.sh` | `run-role.sh` | Stub host (codex biçimi dahil) ile test edildi; canlı CLI bayrakları F00 §8.8 gibi **doğrulanmadı** |
-| Codex, OpenCode, Cursor, Gemini — host'un kendi alt ajanı | yok | yok | Kitte alt ajan sonucu hook'u yok (`adapt.sh` yalnızca araç çağrısı çevirir; OpenCode eklentisi sözleşme hook'unu taşımaz). **Güvenli yedek:** orkestratör `contract.sh issue/check-result` komutlarını elle çağırır (`references/contract.md`) ya da rolü `run-role.sh` ile ayrı süreç olarak açar |
-| Başka | — | — | Rolü ana oturumda oynamak: yine elle |
+| Claude Code, `Agent` tool | PreToolUse hook (`check-contract.sh`) | SubagentStop hook | Tested with sample hook JSON; **not verified live** |
+| Claude Code, `run-role.sh --host claude` | `run-role.sh` | `run-role.sh` (from the `result` JSON) | Tested with a stub host; no live CLI |
+| Codex, OpenCode, Cursor, Gemini — `run-role.sh` | `run-role.sh` | `run-role.sh` | Tested with a stub host (codex format included); live CLI flags **not verified**, as in F00 §8.8 |
+| Codex, OpenCode, Cursor, Gemini — the host's own subagent | none | none | The kit has no subagent result hook (`adapt.sh` only translates tool calls; the OpenCode plugin does not carry the contract hook). **Safe fallback:** the orchestrator calls the `contract.sh issue/check-result` commands by hand (`references/contract.md`) or opens the role as a separate process with `run-role.sh` |
+| Other | — | — | Playing the role in the main session: again by hand |
 
-## 6. Telemetri entegrasyonu (F01'in yeniden kullanımı)
+## 6. Telemetry integration (reuse of F01)
 
-Yeni olay türü `contract.check` (aynı `events.jsonl`, aynı `errs` şeması, ikinci defter yok), yeni alanlar `contract` (etiket), `stage` (`handoff\|result`), `status` (`done/partial/blocked/failed`), `reason` (15 kategori), `bytes`, `cv` (sözleşme sürümü); `role`, `source`, `task` ve koşu kimliği (`run`) mevcut alanlar. Geçersiz sonuçta ayrıca `failure` + yeni kategori `contract`. `summary`/`render` yeni `contracts` bölümü verir (kontrol, geçerli/geçersiz, kategori dağılımı, ajan durumu, devir/cevap baytı, sürüm); hiç sözleşme olayı yoksa çıktı değişmez.
+New event type `contract.check` (same `events.jsonl`, same `errs` schema, no second ledger), new fields `contract` (label), `stage` (`handoff\|result`), `status` (`done/partial/blocked/failed`), `reason` (15 categories), `bytes`, `cv` (contract version); `role`, `source`, `task` and the run ID (`run`) are existing fields. On an invalid result, also `failure` + the new category `contract`. `summary`/`render` produce a new `contracts` section (checks, valid/invalid, category distribution, agent status, handoff/answer bytes, version); with no contract events at all, the output does not change.
 
-- Metin, istem, blocker açıklaması **kaydedilmez** (test): yalnızca kimlik etiketi, rol, kategori, durum ve bayt sayısı.
-- `bytes` yerelde ölçülen gerçek değerdir (kabuk sondaki satır sonunu atar, 1-2 bayt farkı olur). Token/süre alanları bu olayda yoktur; kayıp token hiçbir yerde 0 sayılmaz (F01 kuralı aynen).
-- Kapalıyken (`TELEMETRY` ≠ 1) sözleşme çalışır, olay dosyası oluşmaz (test).
-- Doğrulama gecikmesi olayda **yok** (macOS `date` milisaniye vermez); `bench/run.sh overhead` ölçer.
+- Text, prompts and blocker descriptions are **not recorded** (test): only the ID label, role, category, status and byte count.
+- `bytes` is the real value measured locally (the shell drops the trailing newline, so it can be off by 1-2 bytes). Token/duration fields are not in this event; missing tokens are never counted as 0 anywhere (the F01 rule, unchanged).
+- When it is off (`TELEMETRY` ≠ 1), the contract works and no event file is created (test).
+- Validation latency is **not** in the event (macOS `date` gives no milliseconds); `bench/run.sh overhead` measures it.
 
-## 7. Benchmark: F01 taban çizgisine karşı (simüle; token/maliyet iddiası yok)
+## 7. Benchmark: against the F01 baseline (simulated; no token/cost claim)
 
-Taban çizgisi bütünlüğü: F02 değişikliklerinden önce alınan `bench/run.sh run all` çıktısının `deterministic` kısmı, değişikliklerden sonrakiyle **bit bit aynıdır** (4/4 senaryo, özet sağlaması eşit).
+Baseline integrity: the `deterministic` part of the `bench/run.sh run all` output taken before the F02 changes is **bit-for-bit identical** to the one taken after them (4/4 scenarios, equal digest checksums).
 
-**Beş sözleşme fikstürü** (`bench/run.sh run contracts`, GROUP=contract; `run all` yine yalnızca F01'in dört senaryosu):
+**Five contract fixtures** (`bench/run.sh run contracts`, GROUP=contract; `run all` still covers only F01's four scenarios):
 
-| Fikstür | Ne sınar | Sonuç (iki koşuda aynı) |
+| Fixture | What it tests | Result (same in two runs) |
 |---|---|---|
-| `contract-valid-single` | geçerli tek devir | 1 devir, 1 cevap, 0 geçersiz; tamamlandı |
-| `contract-invalid-handoff` | dev-a'nın devri eksik (`SCOPE` yok): **ajan başlamadan** reddedilir (`missing-field`), düzeltilip yeniden verilir; dev-b'nin cevabında işaretçi yok (`malformed`), tek yeniden deneme (yeni kimlik + `RETRY-OF`) ile düzelir; bağımsız verifier PASS | 2 geçersiz (`malformed`, `missing-field`), 1 yeniden deneme, `failure/contract` 2; tamamlandı |
-| `contract-multi-chain` | 7 ajan, hepsi sözleşmeli; sonraki devirler önceki çıktıları `READ` olarak adlandırır (artefakt zinciri doğrulanır); reviewer+verifier başka host | 7 devir, 7 cevap, 0 geçersiz; tamamlandı |
-| `contract-interrupted` | ajan süreci çöker (çıkış 7); kimlik `interrupted` kapanır, tek yeniden deneme başarılı | `host-error` 1, `no-result` 1, 1 yeniden deneme; token 1/2 koşuda ölçülmüş (çöken koşu 0 sayılmaz); tamamlandı |
-| `contract-verifier-evidence` | verifier devri yalnızca artefakt/diff tabanı içerir (**uygulayıcının çıktısı yok**); sözleşmesi geçerli, verdict `parse-verdict.sh` ile ayrı karara bağlanır | PASS yalnızca verdict'ten; tamamlandı |
+| `contract-valid-single` | a valid single handoff | 1 handoff, 1 answer, 0 invalid; completed |
+| `contract-invalid-handoff` | dev-a's handoff is incomplete (no `SCOPE`): refused **before the agent starts** (`missing-field`), fixed and reissued; dev-b's answer has no marker (`malformed`) and is fixed by the single retry (new ID + `RETRY-OF`); independent verifier PASS | 2 invalid (`malformed`, `missing-field`), 1 retry, `failure/contract` 2; completed |
+| `contract-multi-chain` | 7 agents, all contracted; later handoffs name earlier outputs in `READ` (the artifact chain is validated); reviewer+verifier on another host | 7 handoffs, 7 answers, 0 invalid; completed |
+| `contract-interrupted` | the agent process crashes (exit 7); the ID is closed as `interrupted`, the single retry succeeds | `host-error` 1, `no-result` 1, 1 retry; tokens measured in 1/2 runs (the crashed run is not counted as 0); completed |
+| `contract-verifier-evidence` | the verifier handoff contains only the artifacts/diff base (**no implementer output**); its contract is valid, and the verdict is decided separately by `parse-verdict.sh` | PASS comes only from the verdict; completed |
 
-**Ek yük, F01 senaryoları sözleşmeli/sözleşmesiz** (`bench/run.sh overhead`, deterministik sütunlar):
+**Overhead, F01 scenarios with/without contracts** (`bench/run.sh overhead`, deterministic columns):
 
-| Senaryo | Ajan | Devir bayt (düz → sözleşmeli) | Cevap bayt (düz → sözleşmeli) | Olay (düz → sözleşmeli) | `contract.sh` çağrısı |
+| Scenario | Agents | Handoff bytes (plain → contracted) | Answer bytes (plain → contracted) | Events (plain → contracted) | `contract.sh` calls |
 |---|---|---|---|---|---|
 | low-single-file | 1 | 293 → 456 | 29 → 154 | 13 → 15 | 2 |
 | medium-multi-file | 2 | 879 → 985 | 209 → 482 | 15 → 19 | 4 |
 | high-independent-verify | 5 | 2934 → 3085 | 649 → 1334 | 24 → 34 | 10 |
 | multi-agent-handoff | 7 | 4225 → 4515 | 282 → 1164 | 25 → 39 | 14 |
 
-Okuma notları: (a) sözleşmeli devirde mevcut düzyazı satırlarının bir kısmı yapılandırılmış satırlara dönüştüğü için "düz → sözleşmeli" fark yalnızca eklenen metin değildir; eklenen **sabit** metin devir başına 202 bayt (`CONTRACT`, `ID`, `REPLY-END`), cevap başına tipik 119 bayttır. (b) Cevap baytındaki büyük oran, fikstür cevaplarının zaten çok kısa olmasındandır (`low`: 29 bayt). (c) Ajan başına 2 `contract.sh` çağrısı (çağrı öncesi `issue`, sonrası `check-result`), `TELEMETRY=1` iken çağrı başına 1 `telemetry.sh emit` (geçersizse +1); ek ajan çağrısı **sıfırdır**. (d) Token sütunları simülede fikstür değeridir; token/maliyet farkı bu tablodan **okunamaz**.
+Reading notes: (a) in a contracted handoff some existing prose lines turn into structured lines, so the "plain → contracted" difference is not only added text; the **fixed** added text is 202 bytes per handoff (`CONTRACT`, `ID`, `REPLY-END`) and typically 119 bytes per answer. (b) The large ratio in answer bytes comes from the fixture answers already being very short (`low`: 29 bytes). (c) 2 `contract.sh` calls per agent (`issue` before the call, `check-result` after), and 1 `telemetry.sh emit` per call when `TELEMETRY=1` (+1 if invalid); extra agent calls are **zero**. (d) In simulation the token columns are fixture values; a token/cost difference **cannot be read** from this table.
 
-**Doğrulama gecikmesi** (bu makinede ölçüldü, değişir; sonuç dosyalarının deterministik kısmında değil): 100 çağrının ortalaması `contract.sh issue --check-only` ≈ 189 ms, `contract.sh check-result` ≈ 180 ms, kıyas için `parse-verdict.sh` ≈ 153 ms. Süre ağırlıkla süreç başlatma maliyetidir (CPU ≈ %5); bir LLM çağrısının saniyeleriyle kıyaslandığında önemsizdir ama sıfır değildir.
+**Validation latency** (measured on this machine, varies; not in the deterministic part of the result files): averaged over 100 calls, `contract.sh issue --check-only` ≈ 189 ms, `contract.sh check-result` ≈ 180 ms, and `parse-verdict.sh` ≈ 153 ms for comparison. The time is mostly process start-up cost (CPU ≈ 5%); negligible next to the seconds an LLM call takes, but not zero.
 
-**Gerçek LLM ölçümü: yapılmadı.** Tüm sayılar fikstürden veya yerel betik ölçümünden gelir.
+**Real LLM measurement: not done.** All numbers come from fixtures or local script measurements.
 
-## 8. Geriye uyumluluk ve geçiş
+## 8. Backward compatibility and migration
 
-- Varsayılan kapalı: `CONTRACTS` boş (`templates/sdkit.env`, ekip ayarı; `init`/`upgrade` yeni ayarı mevcut dosyalara ekler, var olanı ezmez).
-- `CONTRACT:` satırı olmayan devir **eski devirdir**: `run-role.sh` istemi bayt bayt aynı, hook sessiz, kayıt yok, olay yok (testler). Eski cevap (işaretçisiz) da sessizdir.
-- Eski biçimler için tüketici incelemesi: devri okuyan tek kod `run-role.sh` (dosyayı olduğu gibi isteme koyar) ve bench sürücüsü; cevabı okuyan tek kod `parse-verdict.sh`/`record-verdict.sh` (verifier bloğu). İkisi de değişmedi. Verifier cevabı artık sonunda ek bir `HANDOFF-RESULT` satırı taşıyabilir; `parse-verdict.sh` bu satırı `DOD/FINDINGS/VERIFY/VERDICT` bölümleri arasında aramadığı için etkilenmez (test: aynı metin her iki ayrıştırıcıdan geçer).
-- Yapılandırılmış ama bozuk olan sessizce kabul edilmez: `CONTRACT:` satırı **varsa** devir tam doğrulanır; işaretçi bulunmayan/bozuk/çift/bilinmeyen alanlı cevap `invalid` olur.
-- Geçiş adımı gerekmez. Açmak için: `sdkit.env`'de `CONTRACTS=1`, devirlere `references/contract.md`'deki üç satırı ekle (skill `CONTRACTS=1` iken bunu bilir). Copy modu: `templates/settings.copy.json` hook'u içerir; `migrate.sh` hook adı desenine `check-contract`'ı ekledi.
-- Not (F01 sürücüsünde bulunan gizli hata): `bench/run.sh`'taki `make_handoff` tek `local` satırında `$label`'ı atamadan önce kullanıyordu; `fix` adımının devri çağıranın etiketinin dosyasına yazılıyordu. Düzeltildi; F01 `deterministic` çıktısı etkilenmedi (doğrulandı).
+- Off by default: `CONTRACTS` is empty (`templates/sdkit.env`, a team setting; `init`/`upgrade` add the new setting to existing files and do not overwrite existing values).
+- A handoff without a `CONTRACT:` line is a **legacy handoff**: the `run-role.sh` prompt is byte-for-byte identical, the hook is silent, no record, no event (tests). A legacy answer (no marker) is silent too.
+- Consumer review for legacy formats: the only code that reads the handoff is `run-role.sh` (puts the file into the prompt as is) and the bench driver; the only code that reads the answer is `parse-verdict.sh`/`record-verdict.sh` (verifier block). Neither changed. A verifier answer may now carry an extra `HANDOFF-RESULT` line at the end; `parse-verdict.sh` is not affected because it does not look for that line among the `DOD/FINDINGS/VERIFY/VERDICT` sections (test: the same text passes both parsers).
+- Structured but broken is never silently accepted: **if** there is a `CONTRACT:` line, the handoff is fully validated; an answer whose marker is missing/broken/duplicated/has unknown fields becomes `invalid`.
+- No migration step is needed. To turn it on: `CONTRACTS=1` in `sdkit.env`, and add the three lines from `references/contract.md` to handoffs (the skill knows this when `CONTRACTS=1`). Copy mode: `templates/settings.copy.json` includes the hook; `migrate.sh` added `check-contract` to the hook name pattern.
+- Note (a hidden bug found in the F01 driver): `make_handoff` in `bench/run.sh` used `$label` before assigning it, in a single `local` line; the `fix` step's handoff was written to the file of the caller's label. Fixed; the F01 `deterministic` output was not affected (verified).
 
-## 9. Görevler ve doğrulama kaydı
+## 9. Tasks and verification record
 
-| Görev | Durum |
+| Task | Status |
 |---|---|
-| T1 `scripts/contract.sh` (issue, check-result, close, pending, status, id) | tamam |
-| T2 sınır takibi: `hooks/check-contract.sh` (+ `hooks.json`, `settings.copy.json`, `migrate.sh`), `run-role.sh` | tamam |
-| T3 telemetri: `contract.check`, `failure/contract`, `contracts` özeti | tamam |
-| T4 ayar: `CONTRACTS` (`templates/sdkit.env`) | tamam |
-| T5 bench: 5 fikstür, `--contracts`, `overhead`, stub host (`fail/`, otomatik işaretçi) | tamam |
-| T6 `tests/contract.test.sh` (197 durum) | tamam |
-| T7 belgeler: bu dosya, `references/contract.md`, `handoff.md`, `hosts.md`, `SKILL.md`, `guide.md`, `cheatsheet.md`, `README.md`, `CONTRIBUTING.md`, `upgrading.md`, `design-telemetry.md` | tamam |
+| T1 `scripts/contract.sh` (issue, check-result, close, pending, status, id) | done |
+| T2 boundary integration: `hooks/check-contract.sh` (+ `hooks.json`, `settings.copy.json`, `migrate.sh`), `run-role.sh` | done |
+| T3 telemetry: `contract.check`, `failure/contract`, `contracts` summary | done |
+| T4 setting: `CONTRACTS` (`templates/sdkit.env`) | done |
+| T5 bench: 5 fixtures, `--contracts`, `overhead`, stub host (`fail/`, automatic marker) | done |
+| T6 `tests/contract.test.sh` (197 cases) | done |
+| T7 docs: this file, `references/contract.md`, `handoff.md`, `hosts.md`, `SKILL.md`, `guide.md`, `cheatsheet.md`, `README.md`, `CONTRIBUTING.md`, `upgrading.md`, `design-telemetry.md` | done |
 
-Çalıştırılan denetimler: `tests/run.sh` 109, `sdd` 52, `shared` 29, `memory` 38, `budget` 45, `sdkit-dir` 64, `risk-floor` 76, `hardening` 53, `telemetry` 118 (hepsi F02 öncesiyle aynı sayıda, hiçbiri kırılmadı), **`contract` 197**; hepsi geçti. `bin/build-adapters.sh --check` güncel (rol dosyalarına dokunulmadı). `bash -n` ve `jq .` temiz; `shellcheck` bu makinede kurulu değil, çalıştırılmadı.
+Checks run: `tests/run.sh` 109, `sdd` 52, `shared` 29, `memory` 38, `budget` 45, `sdkit-dir` 64, `risk-floor` 76, `hardening` 53, `telemetry` 118 (all with the same counts as before F02, none broken), **`contract` 197**; all pass. `bin/build-adapters.sh --check` is up to date (role files not touched). `bash -n` and `jq .` are clean; `shellcheck` is not installed on this machine and was not run.
 
-## 10. Bilinen sınırlar ve kalan riskler
+## 10. Known limits and remaining risks
 
-- **Cevap biçimine uyum ajana bağlıdır.** Sözleşme uyumsuzluğu *tespit eder*, ajanın uymasını *sağlamaz*; gerçek modellerin işaretçiyi ne sıklıkla doğru yazdığı **ölçülmedi** (gerçek koşu yapılmadı). Ölçüm için: `bench/run.sh run <senaryo> --contracts --real --host <h> --yes` bu sürümde **tanımlı değildir** (`--contracts` yalnızca simüle); gerçek koşuya sözleşme eklemek F03 öncesi karar bekler.
-- Claude Code hook'u canlı koşturulmadı (bölüm 4/5). Eşleşme `ID` metnine dayanır; alt ajan transkriptinden kimlik okuma doğrulanmadı.
-- Hook'ta sözleşmesiz ve sözleşmeli aynı rol aynı anda çalışırsa, işaretçisiz cevap için yanlış uyarı çıkabilir (yalnızca uyarı).
-- `READ:` alanı virgüllü yol listesi olmak zorunda; açıklamalı düzyazı `unsafe-path`/`missing-artifact` verir. Henüz var olmayan dosya `READ` değil `SCOPE: writes:` içindedir.
-- Kapsam denetimi yalnızca *bildirilen* artefaktları `writes:` ile karşılaştırır; ajanın gerçekte neyi değiştirdiğini `check-writes.sh` ve git hook'ları denetler (ajanın beyanına güvenilmez).
-- `bytes` hesabı kabuk `$(...)` ile sondaki satır sonlarını atar (1-2 bayt).
-- Doğrulama gecikmesi ölçümü makineye bağlı; süreç başlatma baskın.
-- Orkestratörün sözleşme satırlarını devire gerçekten eklemesi skill talimatına bağlıdır (makine zorlamaz); eklemezse devir eski devir sayılır ve kapsam dışı kalır.
-- Alt ajan transkriptinden `agent.start` yok (F01 §7 aynen); bu özellik onu çözmez.
+- **Compliance with the answer format depends on the agent.** The contract *detects* non-compliance; it does not *make* the agent comply. How often real models write the marker correctly was **not measured** (no real run was done). To measure it: `bench/run.sh run <scenario> --contracts --real --host <h> --yes` is **not defined** in this release (`--contracts` is simulated only); adding contracts to a real run awaits a decision before F03.
+- The Claude Code hook was not run live (sections 4/5). Matching relies on the `ID` text; reading the ID from the subagent transcript was not verified.
+- If an uncontracted and a contracted instance of the same role run at the same time in the hook, a false warning can appear for the answer without a marker (warning only).
+- The `READ:` field must be a comma-separated list of paths; prose with explanations gives `unsafe-path`/`missing-artifact`. A file that does not exist yet goes in `SCOPE: writes:`, not in `READ`.
+- The scope check compares only the *declared* artifacts with `writes:`; what the agent actually changed is checked by `check-writes.sh` and the git hooks (the agent's claim is not trusted).
+- The `bytes` count loses trailing newlines through the shell's `$(...)` (1-2 bytes).
+- The validation latency measurement depends on the machine; process start-up dominates.
+- Whether the orchestrator actually adds the contract lines to the handoff depends on the skill instruction (the machine does not enforce it); if it does not, the handoff counts as a legacy handoff and stays out of scope.
+- No `agent.start` from the subagent transcript (F01 §7, unchanged); this feature does not solve that.
 
-## 11. Önerilen sonraki özellik
+## 11. Proposed next feature
 
-**F03: sözleşmeli gerçek koşu ölçümü ve uyum oranı.** Kullanıcı onayıyla (a) F01'in gerçek taban koşusu (henüz alınmadı), (b) aynı senaryolar `--contracts` ile; ölçülen: işaretçi uyum oranı, `invalid` kategorileri, yeniden deneme maliyeti, gerçek token farkı. Karar şu ölçüme bağlı: uyum oranı düşükse `REPLY-END` metni kısaltılır/örneklenir ya da sözleşme yalnızca bağımsız roller ve paralel yazıcılar için zorunlu tutulur. Ayrıca: Claude hook'unun canlı doğrulaması ve (varsa) alt ajan transkriptinden `ID` okuma.
+**F03: real-run measurement with contracts, and the compliance rate.** With user approval, (a) F01's real baseline run (not taken yet), (b) the same scenarios with `--contracts`; measured: the marker compliance rate, `invalid` categories, retry cost, the real token difference. The decision depends on that measurement: if the compliance rate is low, the `REPLY-END` text is shortened/given an example, or the contract is made mandatory only for independent roles and parallel writers. Also: live verification of the Claude hook and (if possible) reading the `ID` from the subagent transcript.
