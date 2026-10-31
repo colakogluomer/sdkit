@@ -11,7 +11,7 @@ spec-driven-gate:
   variables:
     GIT_DEPTH: "0"
   script:
-    - apk add --no-cache bash jq coreutils
+    - apk add --no-cache bash jq coreutils perl-utils
     # merged-results pipelines check out a merge commit: the attestation is bound to the source branch's own content
     - if [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-}" ]; then git checkout -q "$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA"; fi
     - git fetch -q origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

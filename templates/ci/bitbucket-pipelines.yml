@@ -10,6 +10,6 @@ pipelines:
           clone:
             depth: full
           script:
-            - apk add --no-cache bash jq coreutils
+            - apk add --no-cache bash jq coreutils perl-utils
             - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
             - VERIFY_BASE="origin/$BITBUCKET_PR_DESTINATION_BRANCH" bash __KIT_DIR__/scripts/sdd.sh ci-check

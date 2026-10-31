@@ -18,7 +18,8 @@ tiers.env
 .scaffold-manifest.new
 .scaffold-shared
 .scaffold-version
-# kit script copies (brew-less installs); the two the server-side CI gate runs stay in git
+# kit script copies (brew-less installs); the ones the server-side CI gate runs stay in git
 scripts/*
 !scripts/sdd.sh
 !scripts/resolve-base.sh
+!scripts/env.sh
