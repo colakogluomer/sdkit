@@ -1,57 +1,57 @@
-# Projeleri güncelleme
+# Upgrading projects
 
-Kit iki yerde yaşar, ikisi ayrı güncellenir.
+The kit lives in two places, and each is updated separately.
 
-| Parça | Nerede | Nasıl güncellenir |
+| Part | Where | How it is updated |
 |---|---|---|
-| **Plugin tarafı** (skill, rol, hook, script) | Claude Code'un plugin önbelleği | Kit repo'sunda sürüm artar ve değişiklik marketplace kaynağına (kit'in git remote'u) ulaşır; projede plugin yenilenir |
-| **Proje tarafı** (`<project-dir>`: `project.md`, `project.env`, `rules/`, ...) | Projenin kendi repo'su | `bin/upgrade.sh`: yeni dosyaları ekler, sizin dosyalarınıza dokunmaz |
+| **Plugin side** (skills, roles, hooks, scripts) | Claude Code's plugin cache | The version is bumped in the kit repo and the change reaches the marketplace source (the kit's git remote); the plugin is refreshed in the project |
+| **Project side** (`<project-dir>`: `project.md`, `project.env`, `rules/`, ...) | The project's own repo | `bin/upgrade.sh`: adds new files, does not touch your files |
 
-## Adımlar (Claude Code, plugin modu)
+## Steps (Claude Code, plugin mode)
 
-1. **Kit'te yayın:** değişiklikler kit'in marketplace'in baktığı dala (varsayılan branch) girmiş ve `plugin.json` + `marketplace.json` sürümü artmış olmalı. Sürüm artmadan Claude Code yeni sürümü görmez.
-2. **Projede plugin'i yenile:** Claude Code'da `/plugin` ile `spec-driven-kit` marketplace'ini güncelle, sonra plugin'i güncelle; sonra Claude Code'u (oturumu) yeniden başlat. Komut adları sürüme göre değişebilir, `/plugin` menüsü her zaman çalışır.
-3. **Proje tarafını yükselt:** kit'in bir checkout'undan
+1. **Release in the kit:** the changes must have landed on the branch the kit's marketplace watches (the default branch) and the `plugin.json` + `marketplace.json` version must have been bumped. Without a version bump Claude Code does not see the new version.
+2. **Refresh the plugin in the project:** in Claude Code, update the `spec-driven-kit` marketplace with `/plugin`, then update the plugin; then restart Claude Code (the session). Command names may change between versions; the `/plugin` menu always works.
+3. **Upgrade the project side:** from a checkout of the kit
    ```bash
-   <kit>/bin/upgrade.sh /yol/proje
+   <kit>/bin/upgrade.sh /path/to/project
    ```
-   Host, mod ve stack'i kendisi bulur. Yeni dosyaları (ör. `rules/test-first.md`) ekler, `.gitignore`'a eksik satırları ekler, copy modunda `sync.sh` çalıştırır, en sonda `doctor.sh` çalıştırır.
-4. Aşağıdaki "sürüme göre elle yapılacaklar"a bak, `git diff` ile gözden geçir, commit'le.
+   It finds the host, mode and stack by itself. It adds new files (e.g. `rules/test-first.md`), adds missing lines to `.gitignore`, runs `sync.sh` in copy mode, and runs `doctor.sh` at the end.
+4. Check "Manual steps per version" below, review with `git diff`, commit.
 
-Güncel olup olmadığını görmek için: `<project-dir>/.scaffold-version` projenin son yükseltildiği kit sürümüdür; plugin tarafı sürümü `/plugin` menüsünde görünür.
+To see whether you are up to date: `<project-dir>/.scaffold-version` is the kit version the project was last upgraded to; the plugin side's version is shown in the `/plugin` menu.
 
-Copy modu ve Claude dışı hostlar (Codex, OpenCode, Cursor, Gemini): plugin yoktur; 3. adım yeterlidir (`sync.sh` yönetilen dosyaları günceller, yerel düzenlediklerinde çakışmayı farkla gösterir).
+Copy mode and non-Claude hosts (Codex, OpenCode, Cursor, Gemini): there is no plugin; step 3 is enough (`sync.sh` updates the managed files and shows a diff for conflicts where you edited them locally).
 
-Birden çok proje: her biri için `upgrade.sh` bir kez çalıştırılır. Toplu yapmak için:
+Several projects: run `upgrade.sh` once for each. To do it in bulk:
 ```bash
-for p in ~/code/projeA ~/code/projeB; do <kit>/bin/upgrade.sh "$p"; done
+for p in ~/code/projectA ~/code/projectB; do <kit>/bin/upgrade.sh "$p"; done
 ```
 
-## Sürüme göre elle yapılacaklar
+## Manual steps per version
 
 ### 0.3 → 0.4
-`upgrade.sh` şunları kendisi yapar: yeni dosyaları ekler (yeni script ve hook'lar, `verifier-deep` rol dosyası, yeni stack betikleri), `.gitignore`'a eksik satırları ekler, yönetilen kopyaları `sync.sh` ile günceller (copy modu ve Claude dışı hostlar). Sizde kalanlar:
+`upgrade.sh` does the following by itself: adds new files (new scripts and hooks, the `verifier-deep` role file, new stack scripts), adds missing lines to `.gitignore`, updates the managed copies with `sync.sh` (copy mode and non-Claude hosts). What is left to you:
 
-- **Copy modunda Claude projeleri:** yeni hook'ları kendi `.claude/settings.json`'ınıza birleştirin (dosya proje dosyasıdır, ezilmez; örnek: kit'teki `templates/settings.copy.json`). `guard-readonly`: `PreToolUse`, matcher `Bash|Edit|Write|NotebookEdit`. `usage-log`: `Stop` ve `SubagentStop`. Plugin modunda bunlar plugin ile gelir.
-- **`.verify-cache/`:** verify artık yeşil sonucu aynı ağaç için önbellekler. `<project-dir>/.gitignore`'a `.verify-cache/` eklenir (`upgrade.sh` şablondaki eksik satırları ekler); yoksa elle ekleyin.
-- **Yeni `project.env` anahtarları isteğe bağlıdır** (`USAGE_LOG`, `RUN_ROLE_HOST`, `VERIFIER_HOST`, `RUN_ROLE_MODEL_*`, `NODE_PM`, `VERIFY_BUILD`, `JAVA_BUILD_TOOL`, `EXTRA_REVIEW_SKILLS`). Boş = kapalı. Dosya sizindir, ezilmez; açıklamalar için `templates/project.env`'e bakın.
-- **DoD satırı biçimi:** `check-plan-parity.sh` plan, `proposal.md` ve `tasks.md` eşitliğini betikle denetler. DoD maddelerini `D<n>: metin | Verified by: tür` biçiminde yazın; eski serbest biçimli maddelerde betik madde bulamaz (çıkış 2).
-- **`high` riskte** doğrulayıcı artık `verifier-deep`'tir (strong katman, kit tarafında üretilir); ek ayar gerekmez. Başka bir sağlayıcıdan doğrulatmak için `VERIFIER_HOST` ayarlayın (`scripts/run-role.sh`).
-- **Stack betikleri:** `verify.sh` artık ince bir giriş; mantık `steps.sh` (stack) ve `scripts/verify-core.sh` (ortak) içinde. Hepsi yönetilen dosyadır, `sync.sh` günceller. Kopyalanmış `verify.sh`'ı özelleştirdiyseniz `sync.sh` ÇAKIŞMA gösterir: özelleştirmeyi `verify.d/` politikasına veya `VERIFY_CMD`'ye taşıyıp yeni dosyayı alın.
-- **Kullanım kaydı kapalıdır:** token defteri için `project.env`'e `USAGE_LOG=1` yazın; rapor `scripts/usage.sh report`.
-- **Yeni davranışlar:** görev durumu `work/<slug>/state.json`'da tutulur (devam etme, tek otomatik yeniden deneme); verifier çıktısı `parse-verdict.sh` ile doğrulanır; paralel görevlerde `writes:` kapsamı `check-writes.sh` ile denetlenir; handoff'a `WORKTREE:` eklenir. Rollerde salt okunur kısıt artık her hostta uygulanır.
-- **Kit bakımcıları:** `bin/build-adapters.sh --check` ve `tests/run.sh` çalıştırın; projeler için gerekmez.
-- **Yeni host eklemek isterseniz:** `<kit>/bin/init.sh --host <host> /yol/proje` (ör. `opencode`, `cursor`, `gemini`); proje klasörü adı değişmez (var olan korunur).
+- **Claude projects in copy mode:** merge the new hooks into your own `.claude/settings.json` (it is a project file and is not overwritten; example: `templates/settings.copy.json` in the kit). `guard-readonly`: `PreToolUse`, matcher `Bash|Edit|Write|NotebookEdit`. `usage-log`: `Stop` and `SubagentStop`. In plugin mode these come with the plugin.
+- **`.verify-cache/`:** verify now caches a green result for the same tree. `.verify-cache/` is added to `<project-dir>/.gitignore` (`upgrade.sh` adds the lines missing from the template); if not, add it by hand.
+- **New `project.env` keys are optional** (`USAGE_LOG`, `RUN_ROLE_HOST`, `VERIFIER_HOST`, `RUN_ROLE_MODEL_*`, `NODE_PM`, `VERIFY_BUILD`, `JAVA_BUILD_TOOL`, `EXTRA_REVIEW_SKILLS`). Empty = off. The file is yours and is not overwritten; see `templates/project.env` for descriptions.
+- **DoD line format:** `check-plan-parity.sh` checks plan, `proposal.md` and `tasks.md` parity with a script. Write DoD items in the form `D<n>: text | Verified by: type`; in old free-form items the script finds no items (exit 2).
+- **At `high` risk** the verifier is now `verifier-deep` (strong tier, generated on the kit side); no extra setting needed. To have another provider verify, set `VERIFIER_HOST` (`scripts/run-role.sh`).
+- **Stack scripts:** `verify.sh` is now a thin entry point; the logic is in `steps.sh` (stack) and `scripts/verify-core.sh` (shared). All are managed files, `sync.sh` updates them. If you customized a copied `verify.sh`, `sync.sh` shows a CONFLICT: move the customization into a `verify.d/` policy or `VERIFY_CMD` and take the new file.
+- **Usage logging is off:** for the token ledger write `USAGE_LOG=1` in `project.env`; report with `scripts/usage.sh report`.
+- **New behaviour:** task state is kept in `work/<slug>/state.json` (resuming, single automatic retry); verifier output is validated with `parse-verdict.sh`; in parallel tasks the `writes:` scope is checked with `check-writes.sh`; `WORKTREE:` is added to the handoff. The read-only restriction on roles is now enforced on every host.
+- **Kit maintainers:** run `bin/build-adapters.sh --check` and `tests/run.sh`; not needed for projects.
+- **If you want to add a new host:** `<kit>/bin/init.sh --host <host> /path/to/project` (e.g. `opencode`, `cursor`, `gemini`); the project dir name does not change (the existing one is kept).
 
 ### 0.2.x → 0.3.0
-`upgrade.sh` şunları kendisi yapar: `rules/test-first.md` ve `rules/token-economy.md` eklenir, `.gitignore`'a `work/` eklenir. Sizde kalanlar:
+`upgrade.sh` does the following by itself: adds `rules/test-first.md` and `rules/token-economy.md`, adds `work/` to `.gitignore`. What is left to you:
 
-- **`CLAUDE.md` haritası** (`.claude/CLAUDE.md`): proje dosyasıdır, ezilmez. Yeni rolleri ve plan kapısını anlatan güncel metin için `templates/CLAUDE.md`'ye bakıp isteğinize göre birleştirin. Zorunlu değil; skill'ler kendi akışını taşır.
-- **`project.md`'de rubrik** zorunlu olmaya devam eder; yeni bir alan yoktur. Test düzeni bölümünü doldurun: plan kapısı "Verified by" için buraya bakar.
-- **Davranış değişiklikleri:** `spec-driven-dev` artık `propose`'dan önce plan kapısında sizi detaylıca sorgular; `analyst` rolü görevi inceler; `medium`/`high`'da DoD maddeleri "Verified by" taşımak zorundadır. Mevcut açık `openspec` change'lerinizi etkilemez.
-- **Yeni roller** (`analyst`, `scout`, `engineer`, `developer`, `devsecops`) plugin ile gelir; ek ayar gerekmez. Model seviyeleri `core/tiers.env`'de (kit tarafında) tanımlıdır.
-- **Proje klasörü adı** eski projelerde `.claude` olarak kalır; kit onu adıyla bulur. Taşımak zorunda değilsiniz.
-- **Codex'e geçmek isterseniz:** `<kit>/bin/init.sh --host claude,codex /yol/proje` yeni dosyaları (`AGENTS.md`, `.agents/`, `.codex/`, `.githooks/`) ekler; proje klasörü `.claude` olarak kalır (var olan korunur). Her klonda `git config core.hooksPath .githooks`.
+- **The `CLAUDE.md` map** (`.claude/CLAUDE.md`): it is a project file and is not overwritten. For the current text describing the new roles and the plan gate, look at `templates/CLAUDE.md` and merge as you like. Not mandatory; the skills carry their own flow.
+- **The rubric in `project.md`** stays mandatory; there is no new field. Fill in the test layout section: the plan gate looks there for "Verified by".
+- **Behaviour changes:** `spec-driven-dev` now questions you in detail at the plan gate before `propose`; the `analyst` role reviews the task; at `medium`/`high` DoD items must carry "Verified by". Your existing open `openspec` changes are not affected.
+- **New roles** (`analyst`, `scout`, `engineer`, `developer`, `devsecops`) come with the plugin; no extra setting needed. Model tiers are defined in `core/tiers.env` (on the kit side).
+- **The project dir name** stays `.claude` in old projects; the kit finds it by name. You do not have to move it.
+- **If you want to switch to Codex:** `<kit>/bin/init.sh --host claude,codex /path/to/project` adds the new files (`AGENTS.md`, `.agents/`, `.codex/`, `.githooks/`); the project dir stays `.claude` (the existing one is kept). In each clone, `git config core.hooksPath .githooks`.
 
 ## Shared files (AGENTS.md, CLAUDE.md, settings.json, hooks.json, config.toml)
 

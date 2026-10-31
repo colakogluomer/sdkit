@@ -1,62 +1,62 @@
-# Dokümantasyon haritası
+# Documentation map
 
-Nereden başlayacağını role göre seç.
+Pick where to start by your role.
 
-| Ben... | Oku | Sonra |
+| I am... | Read | Then |
 |---|---|---|
-| Hazır bir repoda çalışacak **geliştiriciyim** | [cheatsheet.md](cheatsheet.md) | [guide.md](guide.md) §4 (akış), §7 (hook'lar neden engelledi?) |
-| Yeni bir repoyu **kuracağım** | [../README.md](../README.md) "Quick start" | [guide.md](guide.md) §10 (ayarlar), §11 (kurulum), sonra `doctor.sh` |
-| Bir **hata çözdüm**, tekrarını önlemek istiyorum | [guide.md](guide.md) §5 (`incident-to-rule`) | §8 (`verify.d` protokolü) |
-| Bir hook veya guard'ın **neden çalıştığını/çalışmadığını** anlamaya çalışıyorum | [guide.md](guide.md) §7 | §12 (izin modeli), §13 (sınırlar) |
-| Projemi **yeni kit sürümüne** yükseltmek istiyorum | [upgrading.md](upgrading.md) | `bin/upgrade.sh` |
-| PR'ı **GitHub/GitLab**'a açmak istiyorum | [hosts.md](hosts.md) | |
-| **Codex, OpenCode, Cursor veya Gemini** (ya da Claude ile karışık) kullanacağım | [guide.md](guide.md) §16 | §13 (host sınırları), [../skills/spec-driven-dev/references/hosts.md](../skills/spec-driven-dev/references/hosts.md) |
-| Bir **stack**'in ne sağladığını öğrenmek / yeni stack eklemek istiyorum | [../stacks/README.md](../stacks/README.md) | [../CONTRIBUTING.md](../CONTRIBUTING.md), [guide.md](guide.md) §14 |
-| **Paralel** çalışmak / token harcamasını ve proje belleğini ayarlamak istiyorum | [guide.md](guide.md) §17, §18, §19 | [../core/rules/token-economy.md](../core/rules/token-economy.md) |
-| Bir **rol** eklemek/değiştirmek istiyorum | [../core/roles/README.md](../core/roles/README.md) | [guide.md](guide.md) §6, §14 |
-| Kitin **ne kadar token/zaman harcadığını** ölçmek, benchmark koşturmak istiyorum | [design-telemetry.md](design-telemetry.md) | [guide.md](guide.md) §18 |
-| Ajan **devir/sonuç sözleşmelerini** (`CONTRACTS=1`) anlamak, açmak | [design-contracts.md](design-contracts.md) | [../skills/spec-driven-dev/references/contract.md](../skills/spec-driven-dev/references/contract.md) |
-| İş akışı **profillerini** (small/standard/high-assurance), faz geçişlerini, hata/yeniden deneme politikasını anlamak | [design-workflow.md](design-workflow.md) | [../skills/spec-driven-dev/references/workflow.md](../skills/spec-driven-dev/references/workflow.md) |
-| **Yüksek riskte** reviewer/security-auditor zorlamasını, kanıt geçerliliğini ve host yetenek matrisini anlamak | [design-evidence.md](design-evidence.md) | [design-workflow.md](design-workflow.md) |
-| Hangi **ajanın/modelin** çalışacağını, bütçeyi, yeniden denemeyi ve yükseltmeyi (F06) anlamak | [design-routing.md](design-routing.md) | [design-evidence.md](design-evidence.md) |
-| Aynı görevi **ajanlı geliştirme ile SDKit'in** çözdüğü doğruluk ve maliyet karşılaştırmasını (benchmark altyapısı, F05-A) anlamak | [design-benchmark.md](design-benchmark.md) | [design-telemetry.md](design-telemetry.md) |
-| **Kit'in kendisini** değiştireceğim | [../CONTRIBUTING.md](../CONTRIBUTING.md) | [guide.md](guide.md) §14, §15 |
+| A **developer** working in a repo that is already set up | [cheatsheet.md](cheatsheet.md) | [guide.md](guide.md) §4 (flow), §7 (why did a hook block me?) |
+| About to **set up** a new repo | [../README.md](../README.md) "Quick start" | [guide.md](guide.md) §10 (settings), §11 (install), then `doctor.sh` |
+| Someone who **fixed a bug** and wants to stop it recurring | [guide.md](guide.md) §5 (`incident-to-rule`) | §8 (`verify.d` protocol) |
+| Trying to understand **why a hook or guard ran / did not run** | [guide.md](guide.md) §7 | §12 (permission model), §13 (limits) |
+| Upgrading my project to a **new kit version** | [upgrading.md](upgrading.md) | `bin/upgrade.sh` |
+| Opening the PR on **GitHub/GitLab** | [hosts.md](hosts.md) | |
+| Going to use **Codex, OpenCode, Cursor or Gemini** (or mixed with Claude) | [guide.md](guide.md) §16 | §13 (host limits), [../skills/spec-driven-dev/references/hosts.md](../skills/spec-driven-dev/references/hosts.md) |
+| Learning what a **stack** provides / adding a new stack | [../stacks/README.md](../stacks/README.md) | [../CONTRIBUTING.md](../CONTRIBUTING.md), [guide.md](guide.md) §14 |
+| Working in **parallel** / tuning token spend and project memory | [guide.md](guide.md) §17, §18, §19 | [../core/rules/token-economy.md](../core/rules/token-economy.md) |
+| Adding/changing a **role** | [../core/roles/README.md](../core/roles/README.md) | [guide.md](guide.md) §6, §14 |
+| Measuring **how many tokens / how much time the kit spends**, running benchmarks | [design-telemetry.md](design-telemetry.md) | [guide.md](guide.md) §18 |
+| Understanding and enabling agent **handoff/result contracts** (`CONTRACTS=1`) | [design-contracts.md](design-contracts.md) | [../skills/spec-driven-dev/references/contract.md](../skills/spec-driven-dev/references/contract.md) |
+| Understanding workflow **profiles** (small/standard/high-assurance), phase transitions, the failure/retry policy | [design-workflow.md](design-workflow.md) | [../skills/spec-driven-dev/references/workflow.md](../skills/spec-driven-dev/references/workflow.md) |
+| Understanding reviewer/security-auditor enforcement at **high risk**, evidence validity and the host capability matrix | [design-evidence.md](design-evidence.md) | [design-workflow.md](design-workflow.md) |
+| Understanding which **agent/model** runs, the budget, retries and escalation (F06) | [design-routing.md](design-routing.md) | [design-evidence.md](design-evidence.md) |
+| Understanding the correctness and cost comparison of the same task solved by **plain agentic development vs. SDKit** (benchmark infrastructure, F05-A) | [design-benchmark.md](design-benchmark.md) | [design-telemetry.md](design-telemetry.md) |
+| Going to change **the kit itself** | [../CONTRIBUTING.md](../CONTRIBUTING.md) | [guide.md](guide.md) §14, §15 |
 
-## Dosyalar
+## Files
 
-| Dosya | İçerik |
+| File | Contents |
 |---|---|
-| [cheatsheet.md](cheatsheet.md) | Tek sayfa: komutlar, risk tablosu, "X olduysa Y yap", sık sorunlar |
-| [design-sdkit-dir.md](design-sdkit-dir.md) | Tasarım kaydı: tek `.sdkit/` dizini, kişisel `sdkit.env`, neyin git'e girdiği, doğrulamalar ve sapmalar (1.0.0) |
-| [audit-architecture.md](audit-architecture.md) | Mimari ve yetenek denetimi (F00): bileşen haritası, yetenek envanteri, yaşam döngüleri, bulgular, öncelikli liste, önerilen ADR'ler |
-| [design-routing.md](design-routing.md) | Akıllı orkestrasyon (F06): karar motoru, model kayıt defteri, yürütme sözleşmesi, yeniden deneme/yükseltme, bütçe (sert/danışma), yönlendirme matrisi, güven sınırları |
-| [design-benchmark.md](design-benchmark.md) | Görev benchmark'ı (F05-A): görev kaydı, yalıtım ve güvenlik sınırı, stratejiler, metrikler (host başına), simülasyon, rapor, F05-B önkoşulları |
-| [design-telemetry.md](design-telemetry.md) | Temel ölçüm ve telemetri (F01): olay şeması, hangi metrik güvenilir, benchmark çerçevesi, simüle sonuçlar, sınırlar, F02 önerileri |
-| [design-contracts.md](design-contracts.md) | Ajan sözleşmeleri (F02): devir/sonuç biçimi, doğrulama kategorileri, host durumu, benchmark ek yükü, geçiş, sınırlar |
-| [design-evidence.md](design-evidence.md) | Kanıt bütünlüğü (F04): yüksek risk zorlaması, güven sınırı, geçerlilik durumları, atomiklik, host yetenek matrisi, kabul edilen sınırlar |
-| [guide.md](guide.md) | Tam rehber: her skill, agent, hook, motor, ayar, kurulum akışı, sınır |
-| [upgrading.md](upgrading.md) | Projeleri yeni kit sürümüne yükseltme, sürüme göre elle yapılacaklar |
-| [hosts.md](hosts.md) | PR host'ları (Bitbucket hazır; GitHub/GitLab notları) |
-| [../stacks/README.md](../stacks/README.md) | Stack sözleşmesi: `detect.sh`, `steps.sh`, `tools.sh`, `permissions.txt` |
-| [../tests/run.sh](../tests/run.sh) | Kit bakımcıları için betik/hook/init smoke testi |
+| [cheatsheet.md](cheatsheet.md) | One page: commands, risk table, "if X happened, do Y", common problems |
+| [design-sdkit-dir.md](design-sdkit-dir.md) | Design record: single `.sdkit/` directory, personal `sdkit.env`, what goes into git, verifications and deviations (1.0.0) |
+| [audit-architecture.md](audit-architecture.md) | Architecture and capability audit (F00): component map, capability inventory, lifecycles, findings, prioritized list, proposed ADRs |
+| [design-routing.md](design-routing.md) | Smart orchestration (F06): decision engine, model registry, execution contract, retry/escalation, budget (hard/advisory), routing matrix, trust boundaries |
+| [design-benchmark.md](design-benchmark.md) | Task benchmark (F05-A): task registry, isolation and security boundary, strategies, metrics (per host), simulation, report, F05-B prerequisites |
+| [design-telemetry.md](design-telemetry.md) | Baseline measurement and telemetry (F01): event schema, which metric is reliable, benchmark framework, simulated results, limits, F02 recommendations |
+| [design-contracts.md](design-contracts.md) | Agent contracts (F02): handoff/result format, validation categories, host status, benchmark overhead, migration, limits |
+| [design-evidence.md](design-evidence.md) | Evidence integrity (F04): high-risk enforcement, trust boundary, validity states, atomicity, host capability matrix, accepted limits |
+| [guide.md](guide.md) | Full guide: every skill, agent, hook, engine, setting, install flow, limit |
+| [upgrading.md](upgrading.md) | Upgrading projects to a new kit version, manual steps per version |
+| [hosts.md](hosts.md) | PR hosts (Bitbucket, GitHub, GitLab) and CI gates |
+| [../stacks/README.md](../stacks/README.md) | Stack contract: `detect.sh`, `steps.sh`, `tools.sh`, `permissions.txt` |
+| [../tests/run.sh](../tests/run.sh) | Script/hook/init smoke test for kit maintainers |
 
-## Sözlük
+## Glossary
 
-| Terim | Anlamı |
+| Term | Meaning |
 |---|---|
-| **DoD** | Definition of Done: `proposal.md`'deki, test veya diff ile PASS/FAIL denebilen kabul koşulları |
-| **Risk etiketi** | `low` / `medium` / `high`. Proje rubriğine göre önerilir, kullanıcı onaylar; doğrulama derinliğini belirler |
-| **Verifier** | Gerçekleştirmeyi görmemiş, DoD'yi ve diff'i bağımsız değerlendiren agent |
-| **Diff tabanı** | Değişikliğin kıyaslandığı ref (`resolve-base.sh`): release branch'i veya `origin/BASE_BRANCH` |
-| **Frozen test** | `high` riskte yazılıp `<project-dir>/.frozen`'a eklenen, uygulayıcının değiştiremediği regresyon testi |
-| **`verify.d`** | Projenin kendi kontrolleri: `<project-dir>/verify.d/` altında `FAIL:`/`WARN:` basan çalıştırılabilir betikler |
-| **Rol** | `core/roles/` altında araçtan bağımsız tanımlı ajan sorumluluğu; her host için subagent dosyasına üretilir |
-| **Katman (tier)** | Rolün maliyet sınıfı: `light` / `standard` / `strong`; `core/tiers.env` modele eşler |
-| **Plan kapısı** | `propose`'dan önce planın sana detaylıca sorularak onaylandığı adım |
-| **Dalga (wave)** | Birbirinden bağımsız, yazma yolları çakışmayan ve paralel çalışabilen görev grubu |
-| **Host** | Kit'in çalıştığı ajan aracı: Claude Code, Codex, OpenCode, Cursor veya Gemini CLI. (PR host'u ayrıdır: Bitbucket vb.) |
-| **Stack** | Dil/framework parçası: `go`, `spring-boot`, `nextjs`, `react-native`; repo başına bir tane |
-| **`verifier-deep`** | `verifier`'ın strong katmanlı üretilmiş ikizi; `high` riskte kullanılır |
-| **`state.json`** | `work/<slug>/state.json`: görev durumu, devam etme ve tek otomatik yeniden deneme |
-| **Pitfall** | `known-pitfalls.md`'deki, verifier'ın her diff'te aradığı geçmiş hata sınıfı |
-| **Plugin / copy modu** | Kit'in plugin olarak mı yoksa repoya kopyalanarak mı kullanıldığı |
+| **DoD** | Definition of Done: the acceptance criteria in `proposal.md` that a test or the diff can mark PASS/FAIL |
+| **Risk label** | `low` / `medium` / `high`. Proposed from the project's risk rubric, confirmed by the user; sets the depth of verification |
+| **Verifier** | The agent that never saw the implementation and judges the DoD and the diff independently |
+| **Diff base** | The ref the change is compared against (`resolve-base.sh`): the release branch or `origin/BASE_BRANCH` |
+| **Frozen test** | A regression test written at `high` risk and added to `<project-dir>/.frozen`, which the implementer cannot change |
+| **`verify.d`** | The project's own checks: executable scripts under `<project-dir>/verify.d/` that print `FAIL:`/`WARN:` |
+| **Role** | An agent responsibility defined tool-independently under `core/roles/`; generated into a subagent file for each host |
+| **Tier** | A role's cost class: `light` / `standard` / `strong`; `core/tiers.env` maps it to a model |
+| **Plan gate** | The step before `propose` where you are questioned on the plan in detail and approve it |
+| **Wave** | A group of independent tasks whose write paths do not overlap and that can run in parallel |
+| **Host** | The agent tool the kit runs in: Claude Code, Codex, OpenCode, Cursor or Gemini CLI. (The PR host is separate: Bitbucket etc.) |
+| **Stack** | The language/framework part: `go`, `spring-boot`, `nextjs`, `react-native`; one per repo |
+| **`verifier-deep`** | The generated strong-tier twin of `verifier`; used at `high` risk |
+| **`state.json`** | `work/<slug>/state.json`: task state, resuming and the single automatic retry |
+| **Pitfall** | A past bug class in `known-pitfalls.md` that the verifier looks for in every diff |
+| **Plugin / copy mode** | Whether the kit is used as a plugin or by being copied into the repo |

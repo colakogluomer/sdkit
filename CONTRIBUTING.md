@@ -1,125 +1,125 @@
-# Kit'e katkı
+# Contributing to the kit
 
-Bu dosya **kit'in kendisini** değiştirenler içindir. Kit'i bir projede kullanmak için [README.md](README.md) ve
+This file is for people who change **the kit itself**. To use the kit in a project see [README.md](README.md) and
 [docs/README.md](docs/README.md).
 
-## Temel kural: kit genel kalır
+## Core rule: the kit stays generic
 
-Skill, agent, hook ve script'lere **projeye özel hiçbir şey gömülmez**: branch adı, cluster adı, servis adı, takım jargonu, risk ölçütü yok.
-Bunlar projedeki `<project-dir>/sdkit.env` ve `project.md`'den gelir. Bir değişiklik için "bu yalnızca bizim projede doğru" diyorsan yeri
-kit değil, o projenin proje klasörüdür (`<project-dir>` = `.sdkit/`; 1.0 öncesi kurulumlarda `.claude`, `.codex` veya `.agentkit`). (Geçmişte bu yüzden bir düzeltme yapıldı: `fix: keep project-specific wording out of the generic hooks and agents`.)
+**Nothing project-specific is baked into** skills, agents, hooks or scripts: no branch names, cluster names, service names, team jargon or risk criteria.
+These come from the project's `<project-dir>/sdkit.env` and `project.md`. If you find yourself saying "this is only true in our project" about a change, it belongs
+not in the kit but in that project's project dir (`<project-dir>` = `.sdkit/`; `.claude`, `.codex` or `.agentkit` in pre-1.0 installs). (A fix was made for exactly this reason in the past: `fix: keep project-specific wording out of the generic hooks and agents`.)
 
-İkinci kural: **proje tarafı dosyalarının üzerine yazma.** `init.sh` var olan `project.*`, `rules/`, `settings.json` dosyalarını `--force` ile bile ezmez;
-`--force` yalnızca copy modunun yönetilen dosyaları içindir.
+Second rule: **do not overwrite project-side files.** `init.sh` never overwrites existing `project.*`, `rules/`, `settings.json` files, not even with `--force`;
+`--force` is only for the managed files of copy mode.
 
-## Neyi nereye eklerim
+## What goes where
 
-| Eklemek istediğim | Yer | Ayrıca |
+| I want to add | Where | Also |
 |---|---|---|
-| Skill | `skills/<ad>/SKILL.md` (frontmatter: `name`, `description`, `license`, `metadata`) | `description` "ne zaman kullanılır"ı söylemeli; `docs/guide.md` §5 ve README tabloları |
-| Rol (agent) | `core/roles/<ad>.md` (frontmatter: `name`, `description`, `kind`, `access`, `tier`, `independent`, isteğe bağlı `deep`), sonra `bin/build-adapters.sh` | **`agents/` ve `adapters/<host>/` üretilmiştir, elle düzenleme.** Erişimi en dar tut (bağımsız roller `read-only`); çıktı formatını sabitle; `core/roles/README.md` ve `guide.md` §6 |
-| Hook | `hooks/<ad>.sh` + `hooks/hooks.json` bağlantısı | `hooks/lib.sh`'daki `jget`/`decide`'ı kullan; kapatan ayarı (`sdkit.env`) belgele; `guide.md` §7 tablosu; `init`/`doctor`'ın copy modu bağlantısı |
-| `sdkit.env` ayarı | ekip politikasıysa `templates/sdkit.env`, kişiselse (limit, bütçe, host/model, memory davranışı) `templates/sdkit.local.env`; varsayılan satırlar mevcut dosyalara `init`/`upgrade` ile otomatik eklenir. Anahtarı kişisel yaparsan `split_personal_env` de onu taşır | Varsayılanı güvenli seç (boş = özellik kapalı); `guide.md` §10 |
-| Genel kural | `core/rules/` | Dilden bağımsız olmalı; `init.sh` projeye kopyalar |
-| Akış adımı / ayrıntı | `skills/spec-driven-dev/SKILL.md` kısa kalır; ayrıntı `references/` altına | Token ekonomisi: referans yalnızca ilgili adımda okunur; `SKILL.md`'yi şişirme |
-| Yeni host | Aşağıdaki "Yeni host eklemek" listesi | `guide.md` §14, §16 |
-| Araçtan bağımsız guard | `scripts/guard.sh` + `adapters/git/` | Claude hook'larıyla aynı kural, commit/push anında |
-| Dil/stack | `stacks/<ad>/` | Aşağıdaki "Yeni stack eklemek" listesi, `guide.md` §14 |
-| Proje şablonu | `templates/` | `init.sh` bunu yazar, `doctor.sh` kontrol eder; ikisini de güncelle |
-| Örnek `verify.d` politikası | `stacks/<stack>/verify.d.example/*.sh.example` | `FAIL:`/`WARN:` protokolü |
+| Skill | `skills/<name>/SKILL.md` (frontmatter: `name`, `description`, `license`, `metadata`) | `description` must say "when to use it"; `docs/guide.md` §5 and the README tables |
+| Role (agent) | `core/roles/<name>.md` (frontmatter: `name`, `description`, `kind`, `access`, `tier`, `independent`, optional `deep`), then `bin/build-adapters.sh` | **`agents/` and `adapters/<host>/` are generated, do not edit them by hand.** Keep access as narrow as possible (independent roles `read-only`); fix the output format; `core/roles/README.md` and `guide.md` §6 |
+| Hook | `hooks/<name>.sh` + wiring in `hooks/hooks.json` | Use `jget`/`decide` from `hooks/lib.sh`; document the setting that turns it off (`sdkit.env`); the table in `guide.md` §7; the copy-mode wiring in `init`/`doctor` |
+| `sdkit.env` setting | `templates/sdkit.env` if it is team policy, `templates/sdkit.local.env` if it is personal (limit, budget, host/model, memory behaviour); default lines are appended to existing files automatically by `init`/`upgrade`. If you make a key personal, `split_personal_env` moves it too | Pick a safe default (empty = feature off); `guide.md` §10 |
+| Generic rule | `core/rules/` | Must be language-independent; `init.sh` copies it into the project |
+| Flow step / detail | `skills/spec-driven-dev/SKILL.md` stays short; details go under `references/` | Token economy: a reference is read only at the relevant step; do not bloat `SKILL.md` |
+| New host | The "Adding a new host" list below | `guide.md` §14, §16 |
+| Tool-independent guard | `scripts/guard.sh` + `adapters/git/` | The same rule as the Claude hooks, at commit/push time |
+| Language/stack | `stacks/<name>/` | The "Adding a new stack" list below, `guide.md` §14 |
+| Project template | `templates/` | `init.sh` writes it, `doctor.sh` checks it; update both |
+| Example `verify.d` policy | `stacks/<stack>/verify.d.example/*.sh.example` | The `FAIL:`/`WARN:` protocol |
 
-## Hook yazma kuralları
+## Rules for writing hooks
 
-- Girdi stdin'de JSON'dur; `jq` ile oku. Sonuç `permissionDecision` (`deny` / `ask`) JSON'u ya da Stop için block'tur.
-- **Kapalı olmayı varsayılan yap**: ayar boşsa sessizce çık (`exit 0`). Ayarsız bir hook her projede gürültü çıkarır.
-- Yalnızca bilerek engelle: karar vermen gereken durum dışında çıkış kodu 0 olsun, hook'un kendi hatası oturumu kilitlememeli.
-- Deny/ask mesajı nedeni ve çıkış yolunu söylemeli ("`project.md`'ye bak", "aktif release branch'i X").
-- Hook'lar güvenlik sınırı değil emniyettir; kaçış yollarını `guide.md` §13'e yaz.
-- Bu hook'lar Claude Code içindir; Gemini ve Cursor aynılarını `hooks/adapt.sh` kabuğuyla, OpenCode eklentiyle çağırır. Her yerde karşılığı `scripts/guard.sh`'tır (git hook): yeni bir koruma ekliyorsan hepsini birlikte düşün.
-- Stop hook'ları `stop_hook_active` kontrolü yapmalı (sonsuz döngü olmasın) ve `hooks.json`'da zaman aşımı vermeli.
+- Input is JSON on stdin; read it with `jq`. The result is a `permissionDecision` (`deny` / `ask`) JSON or, for Stop, a block.
+- **Make off the default**: if the setting is empty, exit silently (`exit 0`). A hook without a setting makes noise in every project.
+- Block only on purpose: outside the case you need to decide on, the exit code is 0; the hook's own error must not lock up the session.
+- The deny/ask message must state the reason and the way out ("see `project.md`", "the active release branch is X").
+- Hooks are safety nets, not a security boundary; write the escape routes into `guide.md` §13.
+- These hooks are for Claude Code; Gemini and Cursor call the same ones through the `hooks/adapt.sh` wrapper, OpenCode through a plugin. Their counterpart everywhere is `scripts/guard.sh` (git hook): if you add a new guard, think about all of them together.
+- Stop hooks must check `stop_hook_active` (so there is no infinite loop) and set a timeout in `hooks.json`.
 
-## Doğrulama (göndermeden önce)
+## Verification (before submitting)
 
-Önce smoke test: `tests/run.sh` betikleri (verdict, plan eşitliği, yazma kapsamı, state, usage), hook'ları, `run-role.sh --dry-run`'ı ve `init`'i fixture'larla dener (her durum geçmeli mi kalmalı mı diye belirtir); bir betik veya hook değiştirdiysen buraya bir durum ekle. Sonra elle:
+Smoke test first: `tests/run.sh` exercises the scripts (verdict, plan parity, write scope, state, usage), the hooks, `run-role.sh --dry-run` and `init` with fixtures (stating for each case whether it should pass or fail); if you changed a script or hook, add a case there. Then by hand:
 
 ```bash
 tests/run.sh                                                        # smoke test
-tests/sdd.test.sh && tests/shared.test.sh                          # faz makinesi, paylaşılan dosyalar
-tests/memory.test.sh && tests/budget.test.sh                       # proje belleği, token bütçesi, hook bağlantıları
-tests/sdkit-dir.test.sh                                            # .sdkit düzeni, eksik ayar ekleme, eski düzen, --migrate
-tests/risk-floor.test.sh                                            # risk floor (RISK_FLOOR_GLOBS): etiket tabanı, CI atlatma denemeleri
-tests/hardening.test.sh                                            # F00.5: verdict doğrulama, eşzamanlı yazım, ayar dosyası çalıştırmama, görev çözümü, önbellek, STACK
-tests/workflow.test.sh                                             # F03: profiller, geçiş tablosu, red nedenleri, sözleşme politikası, eşzamanlılık, telemetri
-tests/evidence.test.sh                                             # F04: yüksek risk kanıtı (3 rol), güven/kimlik, bayatlık, sahtecilik, eşzamanlılık, adaptör iddiaları
-tests/contract.test.sh                                             # F02: ajan sözleşmeleri (doğrulama, kayıt, hook, run-role, verifier bağımsızlığı, geriye uyum, sözleşme benchmark'ları)
-tests/route.test.sh                                               # F06: yönlendirme kararları, kayıt defteri, zamanlama, yeniden deneme/yükseltme, bütçe, run-role bütünleşmesi (sahte CLI; model çağrısı yok)
-tests/tbench.test.sh                                               # F05-A: görev benchmark'ı (görev kaydı, yalıtım, gizli test ayrımı, metrik içe alma, mühür, rapor, gerçek koşu kapısı; model çağrısı yok)
-tests/telemetry.test.sh                                            # F01: olay şeması, korelasyon, eşzamanlılık, hata yalıtımı, benchmark (simüle; gerçek LLM koşusu yok)
-bin/build-adapters.sh --check                                       # roller ile üretilen dosyalar senkron mu
-bash -n hooks/*.sh bin/*.sh bin/emit/*.sh scripts/*.sh stacks/*/scripts/*.sh adapters/git/*  # sözdizimi
+tests/sdd.test.sh && tests/shared.test.sh                          # phase machine, shared files
+tests/memory.test.sh && tests/budget.test.sh                       # project memory, token budget, hook wiring
+tests/sdkit-dir.test.sh                                            # .sdkit layout, appending missing settings, old layout, --migrate
+tests/risk-floor.test.sh                                            # risk floor (RISK_FLOOR_GLOBS): label floor, CI bypass attempts
+tests/hardening.test.sh                                            # F00.5: verdict validation, concurrent writes, settings files not executed, task resolution, cache, STACK
+tests/workflow.test.sh                                             # F03: profiles, transition table, refusal reasons, contract policy, concurrency, telemetry
+tests/evidence.test.sh                                             # F04: high-risk evidence (3 roles), trust/identity, staleness, forgery, concurrency, adapter claims
+tests/contract.test.sh                                             # F02: agent contracts (validation, recording, hook, run-role, verifier independence, backward compatibility, contract benchmarks)
+tests/route.test.sh                                               # F06: routing decisions, registry, scheduling, retry/escalation, budget, run-role integration (fake CLI; no model call)
+tests/tbench.test.sh                                               # F05-A: task benchmark (task registry, isolation, hidden test separation, metric ingestion, seal, report, real-run gate; no model call)
+tests/telemetry.test.sh                                            # F01: event schema, correlation, concurrency, failure isolation, benchmark (simulated; no real LLM run)
+bin/build-adapters.sh --check                                       # are the roles and generated files in sync
+bash -n hooks/*.sh bin/*.sh bin/emit/*.sh scripts/*.sh stacks/*/scripts/*.sh adapters/git/*  # syntax
 jq . hooks/hooks.json .claude-plugin/*.json templates/settings.*.json >/dev/null
-shellcheck hooks/*.sh bin/*.sh scripts/*.sh                         # kuruluysa
+shellcheck hooks/*.sh bin/*.sh scripts/*.sh                         # if installed
 ```
 
-Sonra bir çöp repoda uçtan uca dene:
+Then try it end to end in a throwaway repo:
 
 ```bash
 tmp="$(mktemp -d)" && git -C "$tmp" init -q && cd "$tmp"
-<kit>/bin/init.sh --stack go "$tmp"              # plugin modu (boş repoda stack algılanamaz, --stack şart)
-<kit>/bin/doctor.sh "$tmp"                          # beklenen FAIL'ler: yalnızca TODO'lu project.md ve (commit yoksa) BASE_BRANCH
-<kit>/bin/init.sh --mode copy --stack go "$tmp2"    # copy modu için ayrı bir çöp repo
-<kit>/bin/init.sh --host claude,codex --stack go "$tmp3"   # Codex dosyaları: AGENTS.md, .agents/, .codex/, .githooks/
+<kit>/bin/init.sh --stack go "$tmp"              # plugin mode (the stack cannot be detected in an empty repo, --stack is required)
+<kit>/bin/doctor.sh "$tmp"                          # expected FAILs: only project.md with TODOs and (if there is no commit) BASE_BRANCH
+<kit>/bin/init.sh --mode copy --stack go "$tmp2"    # a separate throwaway repo for copy mode
+<kit>/bin/init.sh --host claude,codex --stack go "$tmp3"   # Codex files: AGENTS.md, .agents/, .codex/, .githooks/
 <kit>/bin/init.sh --host opencode,cursor,gemini --stack go "$tmp4"   # .sdkit/, .opencode/, .cursor/, .gemini/
 ```
 
-Paralel araçlar için örnek bir `tasks.md` ile `scripts/plan-waves.sh` (dalgaları, bilinmeyen id'yi ve döngüyü dene) ve geçici bir repoda `scripts/worktree.sh add|merge|clean`;
-`scripts/guard.sh` için geçici repoda `.env` / korunan yol / donmuş test stage'leyip `git commit` dene (reddetmeli), temiz dosya geçmeli.
+For the parallel tools, try `scripts/plan-waves.sh` with a sample `tasks.md` (try waves, an unknown id and a cycle) and `scripts/worktree.sh add|merge|clean` in a temporary repo;
+for `scripts/guard.sh`, stage a `.env` / protected path / frozen test in a temporary repo and try `git commit` (it must refuse); a clean file must pass.
 
-Bir hook değiştirdiysen tetikleyen ve **tetiklemeyen** bir girdiyle elle çalıştır:
+If you changed a hook, run it by hand with an input that triggers it and one that **does not**:
 
 ```bash
 echo '{"tool_name":"Read","tool_input":{"file_path":".env"}}' | CLAUDE_PROJECT_DIR="$tmp" <kit>/hooks/guard-secrets.sh
 ```
 
-Bir koruma "kırılıp geçmeden" güvenilmez: hem engellemesi gereken hem izin vermesi gereken durumu dene.
+A guard is not trusted until it has been seen to "fail and then pass": try both the case it must block and the case it must allow.
 
-## Yeni host eklemek
+## Adding a new host
 
-1. `bin/emit/<host>.sh`: `emit_<host>_begin` ve `emit_<host>_role`, çıktı `adapters/<host>/`; `bin/build-adapters.sh`'a bağla, çalıştır, üretilen dosyaları commit'le.
-2. `core/hosts.env` (araç ve izin adları, salt okunur kabuk izin listesi) ve `core/tiers.env` (`<HOST>_MODEL_LIGHT|STANDARD|STRONG`; boş = oturumun modeli).
-3. `bin/init.sh` (`--host` değerleri, proje klasörü adı, host dosyaları), `bin/doctor.sh` (host kontrolleri, CLI notu), `bin/upgrade.sh` (host algılama).
-4. Guard bağlantısı: host Claude hook JSON'una benzemiyorsa `hooks/adapt.sh`'a bir durum ekle veya OpenCode gibi bir eklenti yaz; yoksa yalnızca git hook'ları (`adapters/git/`) kalır.
-5. `scripts/run-role.sh`'a host için bir `case` (başsız çalıştırma bayrakları) ve `--dry-run` ile kontrol.
-6. `skills/spec-driven-dev/references/hosts.md` tablosu, `README.md`, `docs/guide.md` §13, §14, §16 ve `core/roles/README.md` tablosu.
-7. `tests/run.sh`'a durumlar: `run-role.sh --dry-run`, `init.sh --host <host>` çıktısı, varsa `adapt.sh` girdisi. Canlı kurulumda denemediysen README "Limits" ve guide.md §13'te doğrulanmadı olarak belirt.
+1. `bin/emit/<host>.sh`: `emit_<host>_begin` and `emit_<host>_role`, output to `adapters/<host>/`; wire it into `bin/build-adapters.sh`, run it, commit the generated files.
+2. `core/hosts.env` (tool and permission names, read-only shell allow-list) and `core/tiers.env` (`<HOST>_MODEL_LIGHT|STANDARD|STRONG`; empty = the session's model).
+3. `bin/init.sh` (`--host` values, project dir name, host files), `bin/doctor.sh` (host checks, CLI note), `bin/upgrade.sh` (host detection).
+4. Guard wiring: if the host does not resemble the Claude hook JSON, add a case to `hooks/adapt.sh` or write a plugin like OpenCode's; otherwise only the git hooks (`adapters/git/`) remain.
+5. A `case` for the host in `scripts/run-role.sh` (headless run flags) and a check with `--dry-run`.
+6. The table in `skills/spec-driven-dev/references/hosts.md`, `README.md`, `docs/guide.md` §13, §14, §16 and the table in `core/roles/README.md`.
+7. Cases in `tests/run.sh`: `run-role.sh --dry-run`, `init.sh --host <host>` output, the `adapt.sh` input if any. If you did not try it on a live install, mark it as not validated in the README "Limits" and in guide.md §13.
 
-## Yeni stack eklemek
+## Adding a new stack
 
-1. `stacks/<ad>/` sözleşmesi [stacks/README.md](stacks/README.md)'de: `detect.sh`, `scripts/verify.sh` (ince giriş), `scripts/steps.sh` (`STACK_SOURCE_RE`, `stack_run`), `scripts/fmt.sh`, `scripts/tools.sh`, `permissions.txt`, `rules/`, `verify.d.example/`.
-2. `bin/init.sh` algılama sırası (`STACKS` değişkeni: go, spring-boot, react-native, nextjs; ilk eşleşen kazanır): `detect.sh` yanlış pozitif vermemeli.
-3. `scripts/tools.sh`'taki `required|` / `optional|` satırlarını `hooks/check-tools.sh` okur; araç eksikse `warn`, `fail` değil.
-4. `permissions.txt`: Claude `settings.json` "allow" listesine eklenecek kalıplar (en dar halleri).
-5. Ortak mantık `scripts/verify-core.sh`'ta kalır; stack yalnızca `stack_run` yazar. Node tabanlı stack'ler `stacks/_node/scripts/node-lib.sh`'i paylaşır.
-6. `templates/sdkit.env` (yeni stack ayarı varsa), `README.md`, `docs/guide.md` §14 ve `docs/cheatsheet.md`; `tests/run.sh`'a bir fixture eklenebilir.
+1. The `stacks/<name>/` contract is in [stacks/README.md](stacks/README.md): `detect.sh`, `scripts/verify.sh` (thin entry point), `scripts/steps.sh` (`STACK_SOURCE_RE`, `stack_run`), `scripts/fmt.sh`, `scripts/tools.sh`, `permissions.txt`, `rules/`, `verify.d.example/`.
+2. The detection order in `bin/init.sh` (`STACKS` variable: go, spring-boot, react-native, nextjs; first match wins): `detect.sh` must not give false positives.
+3. `hooks/check-tools.sh` reads the `required|` / `optional|` lines in `scripts/tools.sh`; a missing tool is a `warn`, not a `fail`.
+4. `permissions.txt`: patterns to add to the Claude `settings.json` "allow" list (their narrowest form).
+5. Shared logic stays in `scripts/verify-core.sh`; a stack only writes `stack_run`. Node-based stacks share `stacks/_node/scripts/node-lib.sh`.
+6. `templates/sdkit.env` (if there is a new stack setting), `README.md`, `docs/guide.md` §14 and `docs/cheatsheet.md`; a fixture can be added to `tests/run.sh`.
 
-## Sürüm ve yayın
+## Versioning and release
 
-1. Değişikliği yap. Rolleri `core/roles/`'ta değiştirdiysen `bin/build-adapters.sh` çalıştır ve üretilen dosyaları da commit'le. `docs/guide.md` ve README'deki ilgili tabloları güncelle (parça sayıları dahil: skill/rol/hook/script adedi; şu an 4 skill, 10 rol, 16 hook, 17 script).
-2. `.claude-plugin/plugin.json` **ve** `.claude-plugin/marketplace.json` içindeki sürümü birlikte artır (ikisi aynı olmalı).
-   - patch: düzeltme, belge
-   - minor: yeni skill/agent/hook/ayar (varsayılanı kapalı)
-   - major: var olan projelerin proje klasöründeki dosyalarını elle güncellemesini gerektiren değişiklik
-3. Sürümle ilgili elle yapılması gereken bir şey varsa `docs/upgrading.md`'ye "X → Y" bölümü ekle (`upgrade.sh` yeni dosyaları kendisi ekler, geri kalanı oraya yazılır).
-4. Push et ve marketplace'in baktığı dala (varsayılan branch) al; sürüm artmadan veya o dala girmeden projeler yeni sürümü görmez. Plugin kullanan repolar `/plugin` ile günceller; copy modundakiler `sync.sh` çalıştırır, bu yüzden yönetilen dosyaların
-   yolunu değiştirmek copy modundaki projeleri etkiler.
+1. Make the change. If you changed roles in `core/roles/`, run `bin/build-adapters.sh` and commit the generated files too. Update the related tables in `docs/guide.md` and the README (including part counts: number of skills/roles/hooks/scripts; currently 4 skills, 10 roles, 16 hooks, 17 scripts).
+2. Bump the version in `.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json` together (both must match).
+   - patch: fix, docs
+   - minor: new skill/agent/hook/setting (off by default)
+   - major: a change that requires existing projects to update files in their project dir by hand
+3. If the release needs anything done by hand, add an "X → Y" section to `docs/upgrading.md` (`upgrade.sh` adds new files itself; everything else is written there).
+4. Push and get it onto the branch the marketplace watches (the default branch); projects do not see the new version until the version is bumped and it lands on that branch. Repos using the plugin update with `/plugin`; those in copy mode run `sync.sh`, so changing the
+   path of managed files affects projects in copy mode.
 
-## Commit ve branch
+## Commits and branches
 
-[core/rules/git.md](core/rules/git.md) geçerlidir: `<type>(<scope>): <açıklama>`, emir kipi, konu ≤ 72 karakter, branch `<type>/<kısa-ad>`.
-Bu repoda scope kit parçasıdır (`hooks`, `skills`, `verify`, `init` ...); belge değişikliği `docs:`.
+[core/rules/git.md](core/rules/git.md) applies: `<type>(<scope>): <description>`, imperative mood, subject ≤ 72 characters, branch `<type>/<short-name>`.
+In this repo the scope is the kit part (`hooks`, `skills`, `verify`, `init` ...); a doc change is `docs:`.
 
-## Belgeler
+## Docs
 
-- `README.md` İngilizce ve kısa tutulur: ne olduğu, kurulum, bağlantılar.
-- `docs/` Türkçedir. Ayrıntı `guide.md`'de yaşar; `cheatsheet.md` ve README yalnızca özet verir ve guide'a bağlanır, bilgiyi çoğaltma.
-- Bir sayı veya tablo birden çok dosyada geçiyorsa (hook adedi, ayar listesi) hepsini aynı değişiklikte güncelle.
+- `README.md` is kept in English and short: what it is, install, links.
+- `docs/` is in English. Details live in `guide.md`; `cheatsheet.md` and the README only summarize and link to the guide, do not duplicate information.
+- If a number or table appears in several files (hook count, settings list), update all of them in the same change.

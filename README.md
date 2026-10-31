@@ -142,8 +142,8 @@ To adapt a role, write `.sdkit/roles.d/<role>.md`. `sdkit sync --check` and `sdk
 | Read | When |
 |---|---|
 | [docs/README.md](docs/README.md) | Not sure where to start |
-| [docs/cheatsheet.md](docs/cheatsheet.md) | One-page daily reference (Turkish) |
-| [docs/guide.md](docs/guide.md) | Every skill, role, hook, setting, install flow and limit (Turkish) |
+| [docs/cheatsheet.md](docs/cheatsheet.md) | One-page daily reference |
+| [docs/guide.md](docs/guide.md) | Every skill, role, hook, setting, install flow and limit |
 | [docs/upgrading.md](docs/upgrading.md) | Updating projects between kit versions |
 | [docs/hosts.md](docs/hosts.md) | Pull-request host setup |
 | [stacks/README.md](stacks/README.md) | What a stack provides |

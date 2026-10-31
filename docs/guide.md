@@ -1,468 +1,468 @@
-# spec-driven-kit rehberi
+# spec-driven-kit guide
 
-Bu rehber kit'in içindeki her parçayı (skill, agent, hook, script, yapılandırma) ve birbirleriyle nasıl çalıştıklarını
-anlatır. Hızlı kurulum için `README.md`, PR host'ları için `hosts.md` var.
+This guide describes every part of the kit (skill, agent, hook, script, configuration) and how they work together.
+For a quick install see `README.md`; for PR hosts see `hosts.md`.
 
-İçindekiler: 1. Nedir · 2. Genel bakış · 3. Plugin ve proje tarafı ·
-4. Akış: spec-driven-dev · 5. Skill'ler · 6. Roller ·
-7. Hook'lar ve guard'lar · 8. Doğrulama motoru ·
-9. Yardımcı script'ler · 10. Yapılandırma referansı ·
-11. Kurulum akışları · 12. İzin modeli · 13. Sınırlar ·
-14. Genişletme · 15. Dosya haritası ·
-16. Host'lar: Claude Code, Codex, OpenCode, Cursor, Gemini · 17. Paralel çalışma · 18. Token ekonomisi
-
----
-
-## 1. Nedir
-
-Claude Code ile bir göreve "tek seferde, kontrolsüz" girişmek yerine **tanımlı bir süreçten** geçirir:
-
-```
-görev ──► analist (eksik var mı?) ──► risk etiketi (sen onaylarsın) ──► keşif
-      ──► PLAN KAPISI (sen detaylıca onaylarsın) ──► öneri + test-doğrulamalı "Definition of Done"
-      ──► test önce (RED) ──► rollerle gerçekleştirme (GREEN, gerekirse paralel)
-      ──► bağımsız doğrulama ──► PR (ajan açar) ──► kapanış
-```
-
-Kit bir **ajan geliştirme kütüphanesidir**: roller ve akış araçtan bağımsız yazılır, Claude Code, Codex, OpenCode, Cursor ve Gemini CLI için adaptörler üretilir (bölüm 16).
-
-Dört şeyi garanti etmeye çalışır:
-
-1. **Aynı model hem yazıp hem "tamam" diyemez.** Orta ve yüksek riskte doğrulamayı, gerçekleştirmeyi görmemiş ayrı bir agent yapar.
-2. **Kurallar hatırlatma değil, mekanizma.** Tehlikeli veya yanlış bir adım (prod'a `kubectl`, secret dosyası okumak, `develop`'u feature'a
-   merge etmek, kırık kodla "bitti" demek) hook'larla engellenir veya onay ister.
-3. **Test öncelikli düşünce.** Her Definition of Done maddesi nasıl doğrulanacağını söyler; yazılabilen test koddan önce yazılır (`rules/test-first.md`).
-4. **Proje bilgisi kit'in içinde değil.** Risk ölçütleri, kurallar, test yerleşimi, projeye özel kontroller repodaki proje klasörü
-   klasöründe durur. Kit hiçbir projeye özel şey içermez, bu yüzden her repoda çalışır.
-
-İki ek ilke: **token israf edilmez, kısılmaz da** (bölüm 18) ve **uygulama planı sen onaylamadan öneriye (`propose`) geçilmez** (bölüm 4, adım 2).
+Contents: 1. What it is · 2. Overview · 3. Plugin side and project side ·
+4. Flow: spec-driven-dev · 5. Skills · 6. Roles ·
+7. Hooks and guards · 8. Verification engine ·
+9. Helper scripts · 10. Configuration reference ·
+11. Install flows · 12. Permission model · 13. Limits ·
+14. Extending · 15. File map ·
+16. Hosts: Claude Code, Codex, OpenCode, Cursor, Gemini · 17. Parallel work · 18. Token economy
 
 ---
 
-## 2. Genel bakış
+## 1. What it is
 
-| Parça | Adet | Ne işe yarar |
+Instead of tackling a task with Claude Code "in one go, unchecked", the kit runs it through **a defined process**:
+
+```
+task ──► analyst (anything missing?) ──► risk label (you confirm) ──► explore
+     ──► PLAN GATE (you approve in detail) ──► proposal + test-verified "Definition of Done"
+     ──► test first (RED) ──► implement with roles (GREEN, in parallel if needed)
+     ──► independent verification ──► PR (the agent opens it) ──► closeout
+```
+
+The kit is an **agent development library**: roles and flow are written tool-independently, and adapters are generated for Claude Code, Codex, OpenCode, Cursor and Gemini CLI (section 16).
+
+It tries to guarantee four things:
+
+1. **The same model cannot both write the code and say "done".** For medium and high risk, verification is done by a separate agent that never saw the implementation.
+2. **Rules are a mechanism, not a reminder.** A dangerous or wrong step (`kubectl` against prod, reading a secret file, merging `develop` into a feature
+   branch, saying "done" with broken code) is blocked by hooks or needs approval.
+3. **Test-first thinking.** Every Definition of Done item says how it is verified; a test that can be written is written before the code (`rules/test-first.md`).
+4. **Project knowledge is not in the kit.** Risk criteria, rules, test layout and project-specific checks live in the project dir
+   in the repo. The kit contains nothing project-specific, so it works in every repo.
+
+Two extra principles: **tokens are neither wasted nor starved** (section 18), and **nothing moves on to the proposal (`propose`) until you approve the implementation plan** (section 4, step 2).
+
+---
+
+## 2. Overview
+
+| Part | Count | What it does |
 |---|---|---|
-| **Skill** | 4 | Görevi yürüten talimat setleri: `spec-driven-dev` (ana akış, `references/` ile kademeli yüklenir), `incident-to-rule`, `scaffold-init`, `scaffold-doctor` |
-| **Rol** | 10 | `core/roles/` altında araçtan bağımsız tanımlar: `orchestrator`, `analyst`, `scout`, `engineer`, `developer`, `test-writer`, `devsecops`, `reviewer`, `security-auditor`, `verifier`. Dokuzu subagent olarak üretilir; `verifier`'ın `deep: strong` ile strong katmanlı ikizi `verifier-deep` de üretilir, yani host başına **10 rol dosyası** |
-| **Hook** | 17 + 1 | Claude Code'da araç adımları sırasında otomatik çalışan 17 kontrol (`guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract` dahil) ve diğer host'ların aynı hook'ları çağırdığı `adapt.sh` kabuğu. Hook olmayan yerde git hook'ları aynı kuralların çoğunu uygular |
-| **Doğrulama motoru** | 1 çekirdek + stack başına adımlar | `scripts/verify-core.sh` (diff tabanı, değişen dosyalar, `verify.d`, yeşil-sonuç önbelleği) + `stacks/<stack>/scripts/steps.sh` (stack'in kendi kontrolleri) |
-| **Stack** | 7 | `go`, `spring-boot` ve `jvm` (Maven/Gradle), `python`, `nextjs`, `react-native` (son ikisi `stacks/_node/` yardımcısını paylaşır) ve algılama başarısızsa `generic`. Sözleşme: `stacks/README.md` |
-| **Script** | 20 | `sdd.sh`, `resolve-base.sh`, `open-pr.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `check-plan-parity.sh`, `check-writes.sh`, `usage.sh`, `telemetry.sh`, `contract.sh`, `workflow.sh`, `route.sh`, `memory.sh`, `lookup-cache.sh`, `run-role.sh` + `verify-core.sh` ve `verify-lib.sh` (motor; doğrudan çalıştırılmaz) |
-| **Kurallar** | 4+ | `core/rules/`: `general`, `git`, `test-first`, `token-economy` (+ stack kuralları) |
-| **Şablonlar** | | Yeni repoda doldurulacak proje tarafı dosyaları (`templates/`, `stacks/go/`, `core/rules/`) |
-| **Host** | 5 | `claude`, `codex`, `opencode`, `cursor`, `gemini`; rol/guard biçimi `bin/emit/<host>.sh` + `core/hosts.env` (bölüm 16) |
-| **Araçlar** | 6 | `bin/init.sh`, `bin/doctor.sh`, `bin/sync.sh`, `bin/upgrade.sh` (`--migrate` için `bin/migrate.sh`), `bin/build-adapters.sh` + tek komut olan `bin/sdkit` |
+| **Skill** | 4 | Instruction sets that run the task: `spec-driven-dev` (main flow, loaded progressively via `references/`), `incident-to-rule`, `scaffold-init`, `scaffold-doctor` |
+| **Role** | 10 | Tool-independent definitions under `core/roles/`: `orchestrator`, `analyst`, `scout`, `engineer`, `developer`, `test-writer`, `devsecops`, `reviewer`, `security-auditor`, `verifier`. Nine are generated as subagents; `verifier`'s strong-tier twin `verifier-deep` (via `deep: strong`) is generated too, so **10 role files** per host |
+| **Hook** | 17 + 1 | 17 checks that run automatically during tool steps in Claude Code (including `guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract`) and the `adapt.sh` shim through which other hosts call the same hooks. Where there are no hooks, git hooks enforce most of the same rules |
+| **Verification engine** | 1 core + steps per stack | `scripts/verify-core.sh` (diff base, changed files, `verify.d`, green-result cache) + `stacks/<stack>/scripts/steps.sh` (the stack's own checks) |
+| **Stack** | 7 | `go`, `spring-boot` and `jvm` (Maven/Gradle), `python`, `nextjs`, `react-native` (the last two share the `stacks/_node/` helper) and `generic` if detection fails. Contract: `stacks/README.md` |
+| **Script** | 20 | `sdd.sh`, `resolve-base.sh`, `open-pr.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `check-plan-parity.sh`, `check-writes.sh`, `usage.sh`, `telemetry.sh`, `contract.sh`, `workflow.sh`, `route.sh`, `memory.sh`, `lookup-cache.sh`, `run-role.sh` + `verify-core.sh` and `verify-lib.sh` (engine; not run directly) |
+| **Rules** | 4+ | `core/rules/`: `general`, `git`, `test-first`, `token-economy` (+ stack rules) |
+| **Templates** | | Project-side files to fill in for a new repo (`templates/`, `stacks/go/`, `core/rules/`) |
+| **Host** | 5 | `claude`, `codex`, `opencode`, `cursor`, `gemini`; role/guard format in `bin/emit/<host>.sh` + `core/hosts.env` (section 16) |
+| **Tools** | 6 | `bin/init.sh`, `bin/doctor.sh`, `bin/sync.sh`, `bin/upgrade.sh` (`bin/migrate.sh` for `--migrate`), `bin/build-adapters.sh` + the single command `bin/sdkit` |
 
-Kullanıcı tarafında gördüğün isimler plugin kuruluyken ad alanlıdır: `spec-driven-kit:spec-driven-dev`,
-`spec-driven-kit:verifier`. Slash komutu ad alanı olmadan da çalışır: `/spec-driven-dev`. Codex'te skill `$spec-driven-dev` ile çağrılır; diğer host'larda bölüm 16'daki tabloya bak.
+With the plugin installed, the names you see are namespaced: `spec-driven-kit:spec-driven-dev`,
+`spec-driven-kit:verifier`. The slash command also works without the namespace: `/spec-driven-dev`. In Codex the skill is invoked with `$spec-driven-dev`; for other hosts see the table in section 16.
 
 ---
 
-## 3. Plugin ve proje tarafı
+## 3. Plugin side and project side
 
-Kit iki parçadan oluşur ve bunların ayrımı her şeyi belirler.
+The kit has two parts, and the split between them determines everything.
 
-| | Nerede durur | Kim yazar | Örnekler |
+| | Where it lives | Who writes it | Examples |
 |---|---|---|---|
-| **Plugin tarafı** (genel) | Bu repo, Claude Code plugin'i olarak kurulur | Kit bakımcıları | skill'ler, agent'lar, hook'lar, doğrulama motoru, script'ler |
-| **Proje tarafı** (özel) | Her repoda `.sdkit/` (1.0 öncesi kurulumlarda `.claude`, `.codex` veya `.agentkit`; aşağıya bak) | O projenin ekibi | `sdkit.env` (ekibin ortak ayarları), `project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `memory/` (hepsi git'te) ve kişisel `sdkit.local.env` |
+| **Plugin side** (generic) | This repo, installed as a Claude Code plugin | Kit maintainers | skills, agents, hooks, verification engine, scripts |
+| **Project side** (specific) | `.sdkit/` in each repo (`.claude`, `.codex` or `.agentkit` in pre-1.0 installs; see below) | That project's team | `sdkit.env` (the team's shared settings), `project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `memory/` (all in git) and the personal `sdkit.local.env` |
 
-Plugin tarafı, proje tarafını **çalışma anında okur**. Hiçbir şey sabit yazılı değildir: branch adı, risk ölçütleri, korunan yollar,
-prod cluster adı hep proje dosyalarından gelir.
+The plugin side **reads the project side at run time**. Nothing is hard-coded: branch name, risk criteria, protected paths and
+prod cluster name always come from the project files.
 
-### Çalışma modları
+### Run modes
 
-| Mod | Ne zaman | Nasıl |
+| Mode | When | How |
 |---|---|---|
-| **plugin** (varsayılan) | Normal kullanım (yalnız Claude) | Repoda yalnızca proje tarafı var. Hook, agent, skill ve script'ler kurulu plugin'den gelir |
-| **copy** | Plugin kurulamayan ortam | `init.sh --mode copy` hook/agent/skill'leri `.claude/`, kit script'lerini `<project-dir>/scripts/` altına kopyalar; `sdkit.env` onlara işaret eder; `sync.sh` günceller |
+| **plugin** (default) | Normal use (Claude only) | The repo holds only the project side. Hooks, agents, skills and scripts come from the installed plugin |
+| **copy** | Environment where the plugin cannot be installed | `init.sh --mode copy` copies hooks/agents/skills to `.claude/` and kit scripts to `<project-dir>/scripts/`; `sdkit.env` points to them; `sync.sh` updates them |
 
-Hook ve script'ler `VERIFY_CMD` / `DIFF_BASE_CMD` doluysa o yolu (repoya göre), boşsa plugin'in kendi script'ini kullanır.
+Hooks and scripts use the path in `VERIFY_CMD` / `DIFF_BASE_CMD` (relative to the repo) if set, otherwise the plugin's own script.
 
-### Proje klasörü: `.sdkit/`
-1.0'dan itibaren her host için tek proje klasörü vardır: **`.sdkit/`**. Repoya **girer ve herkeste aynıdır**; yalnızca kişisel veya üretilmiş dosyalar girmez (`.sdkit/.gitignore`). Skill'ler, rol metinleri ve belgeler bu klasörden `<project-dir>` diye söz eder. 1.0 öncesi kurulumlarda klasör `.claude`, `.codex` veya `.agentkit` ve ayar dosyası `project.env`'dir; hepsi çalışmaya devam eder, `sdkit upgrade --migrate` `.sdkit/`'e taşır.
+### Project dir: `.sdkit/`
+Since 1.0 there is a single project dir for every host: **`.sdkit/`**. It **is committed and is the same for everyone**; only personal or generated files stay out (`.sdkit/.gitignore`). Skills, role texts and docs refer to this directory as `<project-dir>`. In pre-1.0 installs the directory is `.claude`, `.codex` or `.agentkit` and the settings file is `project.env`; all of these keep working, and `sdkit upgrade --migrate` moves them to `.sdkit/`.
 
-| `.sdkit/` altında | Git | Not |
+| Under `.sdkit/` | Git | Note |
 |---|---|---|
-| `sdkit.env`, `project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `roles.d/`, `memory/`, `attestations/` | **evet** | Ekip için ortak; zamanla güncellenir (güncellemelerin hedefi hep burasıdır). `sdkit.env` ekibin makine-okunur politikasıdır: release akışı, korunan yollar ve branch'ler, prod cluster, secret kalıpları, stack ve doğrulama ayarları, memory konumu |
-| `sdkit.local.env` | hayır | Kişisel, `sdkit.env`'den sonra okunur ve onu ezer: token bütçesi ve limitler, `USAGE_LOG`, `MAX_PARALLEL`, memory davranışı (`MEMORY_AUTOLOAD`, `MEMORY_PROMOTE` ...), host ve model seçimi |
-| `work/`, `.frozen`, `.verify-cache/`, `.sdd/` | hayır | Çalışma zamanı |
-| `hooks/`, `roles/`, `tiers.env`, `scripts/*` (CI için `sdd.sh`, `resolve-base.sh` ve `env.sh` hariç), `.scaffold-*` | hayır | `sdkit init` herkeste aynısını üretir |
+| `sdkit.env`, `project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `roles.d/`, `memory/`, `attestations/` | **yes** | Shared by the team; updated over time (updates always target this place). `sdkit.env` is the team's machine-readable policy: release flow, protected paths and branches, prod cluster, secret patterns, stack and verification settings, memory location |
+| `sdkit.local.env` | no | Personal, read after `sdkit.env` and overrides it: token budget and limits, `USAGE_LOG`, `MAX_PARALLEL`, memory behaviour (`MEMORY_AUTOLOAD`, `MEMORY_PROMOTE` ...), host and model choice |
+| `work/`, `.frozen`, `.verify-cache/`, `.sdd/` | no | Run time |
+| `hooks/`, `roles/`, `tiers.env`, `scripts/*` (except `sdd.sh`, `resolve-base.sh` and `env.sh`, for CI), `.scaffold-*` | no | `sdkit init` generates the same for everyone |
 
-Host klasörlerinde (`.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.opencode/`) repoya yalnızca temel giriş dosyaları girer: `AGENTS.md` ve `.claude/CLAUDE.md` (kit bloğu). Kitin oraya ürettiği her şey (Claude'da `settings.local.json`, roller, hook'lar, `.agents/`, `.githooks/`) bu klonun `.git/info/exclude` dosyasına yazılır; projenin `.gitignore`'una dokunulmaz. Projenin kendi skill, komut ve agent dosyalarına kit karışmaz. Kit'in `CLAUDE.md` ve `AGENTS.md` blokları ajana yeni bilginin host klasörüne değil `.sdkit/`'e yazılacağını söyler.
+In the host directories (`.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.opencode/`) only the basic entry files are committed: `AGENTS.md` and `.claude/CLAUDE.md` (kit block). Everything the kit generates there (on Claude `settings.local.json`, roles, hooks, `.agents/`, `.githooks/`) is written to this clone's `.git/info/exclude`; the project's `.gitignore` is not touched. The kit does not interfere with the project's own skill, command and agent files. The kit's `CLAUDE.md` and `AGENTS.md` blocks tell the agent to write new knowledge to `.sdkit/`, not to the host directory.
 
-### Kim neyi düzenler (sahiplik)
+### Who edits what (ownership)
 
-**Kural: geliştirici kit repo'sunda hiçbir satırı değiştirmez.** Kit'i klonlar, `init.sh` ile kendi reposuna kurar; düzenlediği tek yer kendi reposudur.
-Kit ayarlanacak her şeyi proje tarafında bir dosyaya bırakır:
+**Rule: a developer never changes a single line in the kit repo.** They clone the kit and install it into their own repo with `init.sh`; the only place they edit is their own repo.
+The kit leaves everything that can be configured in a file on the project side:
 
-| Dosya | Sahibi | Kit güncellenince |
+| File | Owner | When the kit is updated |
 |---|---|---|
-| `project.md`, `rules/`, `known-pitfalls.md`, `verify.d/`, `adr/`, `roles.d/`, `memory/`, projenin kendi skill/agent/komutları ve host'un kendi hafıza dosyaları | **Proje** | Kit bir daha dokunmaz |
-| `sdkit.env` | **Ekip** | Commit'li ortak politika. Kit yalnızca şablonda yeni olan ayarları sonuna ekler; var olan satır ve değerlere dokunmaz |
-| `sdkit.local.env` | **Kişi** | Git'e girmez; aynı kural: yalnızca yeni ayarlar eklenir |
-| `AGENTS.md`, `CLAUDE.md`, `.codex/config.toml` | **Ortak**: kit yalnızca `spec-driven-kit:begin … :end` işaretli bloğu yazar, işaretlerin dışı projenindir | `sync.sh` yalnızca bloğu yeniler |
-| `.claude/settings.json` (varsa), `.cursor/hooks.json`, `.gemini/settings.json` | **Ortak**: kit yalnızca kendi anahtar ve girdilerini ekler (plugin, marketplace, izinler, `adapt.sh` / kit hook'ları); senin env, izin, hook ve diğer anahtarların olduğu gibi kalır | `sync.sh` yalnızca kit girdilerini yeniler |
-| `.sdkit/scripts/`, `.sdkit/hooks/`, `.sdkit/roles/`, `.githooks/`, host rol dosyaları (`.codex/agents/` …), `.agents/skills/`, Claude'da `.claude/settings.local.json` | **Kit** (yönetilen kopya; düzenleme, git'e girmez) | `sync.sh` günceller; yerelde değiştirdiysen `CONFLICT` verir |
+| `project.md`, `rules/`, `known-pitfalls.md`, `verify.d/`, `adr/`, `roles.d/`, `memory/`, the project's own skills/agents/commands and the host's own memory files | **Project** | The kit never touches them again |
+| `sdkit.env` | **Team** | Committed shared policy. The kit only appends settings that are new in the template; it does not touch existing lines and values |
+| `sdkit.local.env` | **Each developer** | Not in git; same rule: only new settings are added |
+| `AGENTS.md`, `CLAUDE.md`, `.codex/config.toml` | **Shared**: the kit writes only the block marked `spec-driven-kit:begin … :end`; everything outside the markers belongs to the project | `sync.sh` refreshes only the block |
+| `.claude/settings.json` (if present), `.cursor/hooks.json`, `.gemini/settings.json` | **Shared**: the kit adds only its own keys and entries (plugin, marketplace, permissions, `adapt.sh` / kit hooks); your env, permissions, hooks and other keys stay as they are | `sync.sh` refreshes only the kit entries |
+| `.sdkit/scripts/`, `.sdkit/hooks/`, `.sdkit/roles/`, `.githooks/`, host role files (`.codex/agents/` …), `.agents/skills/`, on Claude `.claude/settings.local.json` | **Kit** (managed copy; do not edit, not in git) | `sync.sh` updates them; gives `CONFLICT` if you changed them locally |
 
-Kit'in davranışını özelleştirmek için kit dosyasını düzenlemek yerine: bir rolün işine proje bilgisi eklemek → `<proje-klasörü>/roles.d/<rol>.md`
-(her rol varsa onu da okur, kuralları gevşetemez); OpenCode'un eski `bash` izin anahtarı → `sdkit.env`'de `OPENCODE_SHELL_KEY=bash`; model/katman →
-`sdkit.env`'deki `RUN_ROLE_MODEL_*`; riskler, test düzeni, release akışı → `project.md`. İşaretli bloğun içine not yazma; kendi metnini işaretlerin dışına yaz. `.scaffold-shared` hangi dosyada kit'in hangi payı olduğunu kaydeder; `sync.sh --check` ve `doctor.sh` kit payının
-güncelliğini denetler. Mevcut bir repoda ilk `upgrade`: işaretsiz `AGENTS.md`/`CLAUDE.md` varsa blok sonuna eklenir; eski kit sürümlerinin yazdığı
-metin dosyada kalmışsa bir kez elle silinir.
+To customize the kit's behaviour, instead of editing a kit file: add project knowledge to a role's job → `<project-dir>/roles.d/<role>.md`
+(each role also reads it if present; it cannot relax the rules); OpenCode's old `bash` permission key → `OPENCODE_SHELL_KEY=bash` in `sdkit.env`; model/tier →
+`RUN_ROLE_MODEL_*` in `sdkit.env`; risks, test layout, release flow → `project.md`. Do not write notes inside the marked block; write your own text outside the markers. `.scaffold-shared` records which share of which file belongs to the kit; `sync.sh --check` and `doctor.sh` check
+that the kit's share is up to date. First `upgrade` in an existing repo: if `AGENTS.md`/`CLAUDE.md` has no markers, the block is appended at the end; text written by
+old kit versions that is still in the file is deleted by hand once.
 
-### Proje tarafının üç ana dosyası
+### The three main project-side files
 
-- **`sdkit.env`**: makine okur (hook'lar ve script'ler `source` eder). Branch, stack, tracker, korunan yollar, opsiyonel modüller. Bkz. bölüm 10.
-- **`project.md`**: insan ve model okur. Tracker aracı, PR aracı, commit scope'ları, test yerleşimi, korunan kod kuralı, **risk rubriği**,
-  (varsa) release akışı. Rubrik olmadan akış başlamaz.
-- **`known-pitfalls.md`**: projenin yaşadığı hata sınıfları. Verifier her diff'i bu listeye karşı tarar.
+- **`sdkit.env`**: read by machines (hooks and scripts `source` it). Branch, stack, tracker, protected paths, optional modules. See section 10.
+- **`project.md`**: read by humans and the model. Tracker tool, PR tool, commit scopes, test layout, protected-code rule, **risk rubric**,
+  release flow (if any). The flow does not start without the rubric.
+- **`known-pitfalls.md`**: the classes of bugs the project has had. The verifier checks every diff against this list.
 
 ---
 
-## 4. Akış: spec-driven-dev
+## 4. Flow: spec-driven-dev
 
-Ana skill. `/spec-driven-dev <ticket veya açıklama>` ile başlar. Aşağıdaki adımları sırayla yürütür; OpenSpec skill'lerini
-(`openspec-explore`, `openspec-propose`, `openspec-sync-specs`, `openspec-archive-change`) çağırarak. Ana oturum **orchestrator** rolündedir.
-Skill kısa tutulur; ayrıntılar `references/` altında ve yalnızca ilgili adımda okunur (`plan-gate.md`, `parallel.md`, `handoff.md`, `hosts.md`, `model-routing.md`).
+The main skill. Starts with `/spec-driven-dev <ticket or description>`. It runs the steps below in order, calling the OpenSpec skills
+(`openspec-explore`, `openspec-propose`, `openspec-sync-specs`, `openspec-archive-change`). The main session plays the **orchestrator** role.
+The skill is kept short; details are under `references/` and read only at the relevant step (`plan-gate.md`, `parallel.md`, `handoff.md`, `hosts.md`, `model-routing.md`).
 
-### Adım 0: Girdi, analist ve risk etiketi
-- Ticket numarası verildiyse ve `TRACKER` doluysa ticket çekilir; yoksa açıklama doğrudan görev olur.
-- **`analyst` rolü** görevi inceler: hedef, test edilebilir kabul ölçütleri, kapsam ve kapsam dışı, hata/uç durumlar, veri etkisi, performans/güvenlik
-  gereksinimi, bağımlılıklar, test edilebilirlik. Koddan cevaplanabilecek şeyi kendisi bulur, kullanıcıya yalnızca koddan çıkmayanı sorar.
-  Çıktı: `READINESS: READY|NEEDS-INFO`, görev özeti, `GAPS` (eksik, neden önemli, soru, önerilen varsayılan), `ASSUMPTIONS`, önerilen risk etiketi.
-- Analist `low` riskte de çalışır (ucuz ve tutarlı; derinlik riske göre değil, katmana göre ayarlanır). Roller başka rolü çağırmaz: cevaplayamadığı arama sorularını çıktısının sonuna `NEEDS-LOOKUP: <soru>` satırları olarak yazar, orchestrator `scout`'u **bir kez** çalıştırıp cevabı yol olarak geri verir.
-- `NEEDS-INFO` ise boşluklar turda en fazla 4 soru olarak sana sorulur (önerilen varsayılan ilk seçenek). DoD'yi etkileyen boşluk açıkken ilerlenmez.
-- Risk etiketini (`low` / `medium` / `high`) **sen onaylar veya değiştirirsin**; sonradan sen söylemeden değişmez. Risk ticket önceliğinden bağımsızdır.
-- Görev durumu `state.sh <slug> init <risk> <branch>` ile `<project-dir>/work/<slug>/state.json`'a yazılır (aşağıda "Devam etme").
+### Step 0: Input, analyst and risk label
+- If a ticket number is given and `TRACKER` is set, the ticket is fetched; otherwise the description becomes the task directly.
+- The **`analyst` role** reviews the task: goal, testable acceptance criteria, scope and out of scope, errors/edge cases, data impact, performance/security
+  requirements, dependencies, testability. It finds what can be answered from the code itself and asks the user only what the code cannot answer.
+  Output: `READINESS: READY|NEEDS-INFO`, task brief, `GAPS` (what is missing, why it matters, question, suggested default), `ASSUMPTIONS`, proposed risk label.
+- The analyst runs at `low` risk too (cheap and consistent; depth is set by tier, not by risk). Roles do not call other roles: lookup questions it cannot answer are written at the end of its output as `NEEDS-LOOKUP: <soru>` lines, and the orchestrator runs `scout` **once** and hands the answer back as a path.
+- If `NEEDS-INFO`, the gaps are asked to you as at most 4 questions per round (suggested default as the first option). No progress while a gap that affects the DoD is open.
+- **You confirm or change** the risk label (`low` / `medium` / `high`); after that it does not change unless you say so. Risk is independent of ticket priority.
+- The task state is written with `state.sh <slug> init <risk> <branch>` to `<project-dir>/work/<slug>/state.json` (see "Resuming" below).
 
-### Adım 1: Keşif
-`openspec-explore` ile problem koda dayandırılır. "Nerede tanımlı / kim çağırıyor" soruları ucuz `scout` rolüne gider. `low` riskte de atlanmaz.
+### Step 1: Explore
+`openspec-explore` grounds the problem in the code. "Where is it defined / who calls it" questions go to the cheap `scout` role. Not skipped at `low` risk either.
 
-### Adım 2: Plan kapısı (öneriden önce)
-`propose`'dan **önce** yapılacakların son doğrulaması, sana detaylıca sorarak. Plan `<project-dir>/work/<slug>/plan.md`'de tutulur (kişisel, git'e girmez).
-`medium`/`high` riskte `engineer` rolü taslak tasarımı, test stratejisini ve görev bölünmesini hazırlar; `low` riskte orchestrator kendisi çıkarır.
+### Step 2: Plan gate (before the proposal)
+The final check of what will be done, **before** `propose`, by asking you in detail. The plan is kept in `<project-dir>/work/<slug>/plan.md` (personal, not in git).
+At `medium`/`high` risk the `engineer` role prepares the draft design, test strategy and task split; at `low` risk the orchestrator drafts them itself.
 
-Plan bölümleri: kapsam ve kapsam dışı · varsayımlar ve açık sorular · **DoD (her madde "Verified by" ile)** · tasarım (reddedilen alternatifler, `high`'da yarış senaryosu) ·
-yürütme planı (görevler, dalgalar, roller) · maliyet şekli (boyut, kaç ajan çalışması; uydurma token sayısı yok) · riskler ve yayın · karar günlüğü.
+Plan sections: scope and out of scope · assumptions and open questions · **DoD (each item with "Verified by")** · design (rejected alternatives, race scenario for `high`) ·
+execution plan (tasks, waves, roles) · cost shape (size, number of agent runs; no made-up token counts) · risks and rollout · decision log.
 
-Sorma biçimi: turlar halinde, turda en fazla 4 soru; her soru ilgili metni alıntılar, `Onayla` ve somut alternatifler sunar, serbest cevap her zaman mümkündür.
+How it asks: in rounds, at most 4 questions per round; each question quotes the relevant text and offers `Onayla` and concrete alternatives; a free-form answer is always possible.
 
-| Risk | Turlar |
+| Risk | Rounds |
 |---|---|
-| `low` | Tek tur (kapsam + DoD + yürütme), sonra son onay |
-| `medium` | Kapsam/varsayımlar · DoD ve test stratejisi madde madde · yürütme ve maliyet · son onay |
-| `high` | Yukarıdakilere ek olarak tasarım ve yarış senaryosu turu ile riskler/yayın turu · son onay |
+| `low` | One round (scope + DoD + execution), then final approval |
+| `medium` | Scope/assumptions · DoD and test strategy item by item · execution and cost · final approval |
+| `high` | In addition to the above, a design and race scenario round and a risks/rollout round · final approval |
 
-**Güncelleme:** her cevap plana işlenir ve karar günlüğüne yazılır. Değişiklik **yayılır**: DoD değişirse test stratejisi ve görevler yeniden kontrol edilir,
-tasarım değişirse DoD ve görevler. Yalnızca değişen ve sonuç doğuran bölümler yeniden gösterilir. Sonraki herhangi bir adımda "planı güncelle" diyebilirsin;
-yalnızca etkilenen turlar tekrarlanır ve `proposal.md`/`tasks.md` OpenSpec skill'leriyle güncellenir.
-Son onayda üç seçenek vardır: `Onayla ve propose et` / `Bir bölümü düzenle` / `Burada dur`. Yalnızca ilki `propose`'a geçirir.
+**Updating:** every answer is applied to the plan and written to the decision log. Changes **propagate**: if the DoD changes, test strategy and tasks are rechecked;
+if the design changes, the DoD and tasks. Only sections that changed and have consequences are shown again. At any later step you can say "update the plan";
+only the affected rounds are repeated, and `proposal.md`/`tasks.md` are updated with the OpenSpec skills.
+The final approval has three options: `Approve and propose` / `Edit a section` / `Stop here`. Only the first moves on to `propose`.
 
-### Adım 3: Öneri ve test-doğrulamalı Definition of Done
-`openspec-propose` plan girdisiyle `proposal.md` / `design.md` / `specs/` / `tasks.md` üretir. `proposal.md`'ye **Definition of Done** eklenir: her kabul ölçütü somut
-bir koşul ve bir **Verified by** girdisi. Satır biçimi sabittir: `D<n>: <metin> | Verified by: <unit test|integration test|manual check|none: gerekçe>`.
-Plan, `proposal.md` ve `tasks.md` arasındaki eşitlik LLM gözüyle değil `scripts/check-plan-parity.sh plan.md proposal.md tasks.md` ile denetlenir (fark varsa düzeltilir veya sana bildirilir). `tasks.md` görevleri `role:` / `writes:` / `after:` taşır
-(bölüm 17). `high` riskte `design.md`'de yarış/sıralama/zamanlama senaryosu zorunludur. Öneri plana madde madde uymalıdır; sapma sana bildirilir.
+### Step 3: Proposal and test-verified Definition of Done
+`openspec-propose` produces `proposal.md` / `design.md` / `specs/` / `tasks.md` from the plan input. A **Definition of Done** is added to `proposal.md`: every acceptance criterion is a concrete
+condition plus a **Verified by** entry. The line format is fixed: `D<n>: <text> | Verified by: <unit test|integration test|manual check|none: reason>`.
+Parity between the plan, `proposal.md` and `tasks.md` is checked not by an LLM's eye but by `scripts/check-plan-parity.sh plan.md proposal.md tasks.md` (any difference is fixed or reported to you). `tasks.md` tasks carry `role:` / `writes:` / `after:`
+(section 17). At `high` risk a race/ordering/timing scenario in `design.md` is mandatory. The proposal must follow the plan item by item; any deviation is reported to you.
 
-### Adım 4: Branch ve rollerle test-önce uygulama
-Branch, `project.md`'deki "branch source" kuralına göre açılır (varsayılan: diff tabanı; release akışlı projede aktif release branch'i).
-Release dondurulmuşsa branch açılmaz, kullanıcıya sorulur.
+### Step 4: Branch and test-first implementation with roles
+The branch is created according to the "branch source" rule in `project.md` (default: the diff base; in a project with a release flow, the active release branch).
+If the release is frozen, no branch is created and the user is asked.
 
-Önce **test edilebilirlik** kontrol edilir: kod gerçek altyapı olmadan test edilemiyorsa (örneğin somut bir istemci tipi) skill durur, hangi tip/çağrının
-engellediğini söyler ve 2-3 seçenek sunar. Sessizce soyutlama eklemez, kapsamı sessizce düşürmez.
+**Testability** is checked first: if the code cannot be tested without real infrastructure (for example a concrete client type), the skill stops, says which type/call
+is in the way and offers 2-3 options. It does not silently add an abstraction or silently cut scope.
 
-Dağıtım: testler `test-writer`, kod `developer`, pipeline/altyapı dosyaları `devsecops` rolüne, her biri bir devir özetiyle (`handoff.md`) gider. Küçük `low` görevleri
-tek oturumda yapılabilir. Bağımsız görevler paralel çalıştırılabilir (bölüm 17).
+Assignment: tests go to the `test-writer` role, code to `developer`, pipeline/infrastructure files to `devsecops`, each with a handoff (`handoff.md`). Small `low` tasks
+can be done in a single session. Independent tasks can run in parallel (section 17).
 
-| Risk | Süreç |
+| Risk | Process |
 |---|---|
-| **low** | DoD'dan test yaz → RED → gerçekleştir → GREEN → verify → PR. Ayrı doğrulayıcı yok |
-| **medium** | low ile aynı + **zorunlu bağımsız doğrulama** (Adım 5) |
-| **high** | Üç ayrı rol: **[A]** `test-writer` (gerçek altyapıda regresyon testi; RED görür; test dosyasını `<project-dir>/.frozen` listesine ekler), **[B]** `developer` (donmuş testi alır ama değiştiremez; yalnızca GREEN'e getirir), **[C]** `verifier`. Ek olarak `reviewer` + `security-auditor` (paralel, salt okunur) |
+| **low** | Write a test from the DoD → RED → implement → GREEN → verify → PR. No separate verifier |
+| **medium** | Same as low + **mandatory independent verification** (Step 5) |
+| **high** | Three separate roles: **[A]** `test-writer` (regression test against real infrastructure; sees RED; adds the test file to the `<project-dir>/.frozen` list), **[B]** `developer` (gets the frozen test but cannot change it; only brings it to GREEN), **[C]** `verifier`. Plus `reviewer` + `security-auditor` (in parallel, read-only) |
 
-`high` riskte roller taze başlatılır, `fork` ile değil; böylece B, A'nın "çözüm nasıl olmalı" çerçevesini miras almaz.
+At `high` risk the roles are started fresh, not with `fork`; that way B does not inherit A's "what the solution should look like" framing.
 
-### Adım 5: Bağımsız doğrulama kapısı
-`verifier` (`high` riskte strong katmanlı ikizi `verifier-deep`) sıfırdan başlatılır ve yalnızca şunu alır: `proposal.md` yolu (+ `high` için `design.md`), diff tabanı, risk etiketi. Önce verify komutunu çalıştırır (kırmızıysa pahalı
-okumaya girmez), sonra her DoD maddesini ve **Verified-by kanıtını** (var olmayan veya değişiklik olmadan da geçen test kanıt sayılmaz), `known-pitfalls.md`'yi tarar ve
-`DOD / FINDINGS / VERIFY / VERDICT` bloğu döner (bölüm 6). Orchestrator çıktıyı `parse-verdict.sh - --proposal proposal.md`'den geçirir: 0 PASS, 1 BLOCK, 2 biçim bozuk veya tutarsız (verifier'dan biçim bir kez istenir; bu bir deneme sayılmaz). Verify kendi içinde önbellek kullanır; verifier'ın temiz bir koşu görmesi gerekirse `--no-cache` (bölüm 8).
-`high` riskte ayrıca `reviewer` + `security-auditor` çalışır; `EXTRA_REVIEW_SKILLS` doluysa host'un kendi inceleme skill'leri de eklenir. Verifier farklı bir model ailesinden olsun istenirse `VERIFIER_HOST` + `run-role.sh` (bölüm 9, 16).
+### Step 5: Independent verification gate
+`verifier` (at `high` risk its strong-tier twin `verifier-deep`) is started from scratch and gets only: the `proposal.md` path (+ `design.md` for `high`), the diff base, the risk label. It first runs the verify command (if red, it skips the expensive
+reading), then checks every DoD item and its **Verified-by evidence** (a test that does not exist, or that passes without the change too, does not count as evidence), scans `known-pitfalls.md` and
+returns a `DOD / FINDINGS / VERIFY / VERDICT` block (section 6). The orchestrator passes the output through `parse-verdict.sh - --proposal proposal.md`: 0 PASS, 1 BLOCK, 2 malformed or inconsistent (the verifier is asked once for the right format; this does not count as a retry). Verify uses a cache internally; if the verifier needs to see a clean run, `--no-cache` (section 8).
+At `high` risk `reviewer` + `security-auditor` also run; if `EXTRA_REVIEW_SKILLS` is set, the host's own review skills are added. If the verifier should come from a different model family, `VERIFIER_HOST` + `run-role.sh` (sections 9, 16).
 
-- Herhangi bir DoD maddesi `FAIL` veya herhangi bir `CONFIRMED` bulgu → `VERDICT: BLOCK` → PR'a geçilmez.
-- `PLAUSIBLE` bulgular kaydedilir ama engellemez.
+- Any DoD item `FAIL` or any `CONFIRMED` finding → `VERDICT: BLOCK` → no PR.
+- `PLAUSIBLE` findings are recorded but do not block.
 
-### Adım 6: Hata yönlendirme ve döngü sınırı
-- **Uygulama hatası** (DoD maddesi sağlam, kod karşılamıyor) → `developer`'a **tam bir** yeniden deneme, yalnızca başarısız maddelerle. Deneme `state.sh <slug> retry <görev>` ile alınır: çıkış 0 devam, 1 hak kullanılmış (dur ve kullanıcıya sor). Sınırı hafıza değil script uygular.
-- **Spec boşluğu** (DoD maddesi tutarsız/yerine getirilemez) → plan kapısına dön (etkilenen turlar) ve kullanıcıyı hemen bilgilendir.
-- Aynı görevde **ikinci bir BLOCK** → otomatik deneme durur; ne olduğunu özetleyip kararı kullanıcıya bırakır. Üçüncü otomatik döngü yoktur.
+### Step 6: Failure routing and loop limit
+- **Implementation failure** (DoD item is sound, the code does not meet it) → **one full** retry to `developer`, with only the failed items. The retry is taken with `state.sh <slug> retry <task>`: exit 0 continue, 1 retry already used (stop and ask the user). The limit is enforced by the script, not by memory.
+- **Spec gap** (DoD item inconsistent/impossible to meet) → back to the plan gate (affected rounds) and inform the user right away.
+- **A second BLOCK** on the same task → automatic retries stop; it summarizes what happened and leaves the decision to the user. There is no third automatic loop.
 
-### Adım 7: PR
-Conventional commit, branch push, ve **PR'ı skill'in kendisi açar** (kullanıcıya iş bırakmaz). PR açıklaması: ne değişti, neden, nasıl test
-edilir, doğrulama sonucu. Hedef branch `project.md`'de yazar. Merge sonrası adımlar kullanıcıya iletilir, skill çalıştırmaz.
+### Step 7: PR
+Conventional commit, branch push, and **the skill opens the PR itself** (leaves no work for the user). PR description: what changed, why, how to
+test it, verification result. The target branch is in `project.md`. Post-merge steps are passed on to the user; the skill does not run them.
 
-### Adım 8: Kapanış
-Merge sonrası `openspec-sync-specs` ve `openspec-archive-change`; `<project-dir>/work/<slug>/` silinir, görev worktree'leri temizlenir.
+### Step 8: Closeout
+After merge, `openspec-sync-specs` and `openspec-archive-change`; `<project-dir>/work/<slug>/` is deleted and the task worktrees are cleaned up.
 
-### Devam etme (resume)
-Durum bir dosyada tutulur: `scripts/state.sh <slug> show` → `<project-dir>/work/<slug>/state.json` (adım, risk, branch, görev durumları, yeniden denemeler, verdict; kişisel, git'e girmez).
-`/clear`, sıkıştırma veya çökme sonrası dosya varsa skill baştan başlamaz, kayıtlı `step`'ten sürer. Kapanışta `work/<slug>/` ile birlikte silinir.
+### Resuming (resume)
+State is kept in a file: `scripts/state.sh <slug> show` → `<project-dir>/work/<slug>/state.json` (step, risk, branch, task states, retries, verdict; personal, not in git).
+After `/clear`, compaction or a crash, if the file exists the skill does not start over; it continues from the recorded `step`. At closeout it is deleted together with `work/<slug>/`.
 
-### Değişmez kurallar
-Aynı rol/oturum hem uygulayıp hem "doğrulandı" diyemez; DoD ve Verified-by atlanamaz; plan onaylanmadan öneri yazılmaz; risk etiketi sessizce atanamaz;
-doğrulama otomatik olarak bir kereden fazla döngüye girmez; çakışan `writes:` paralel çalışmaz; küçük görünse de risk etiketi süreci belirler; proje bilgisi skill'e gömülmez.
+### Invariants
+The same role/session cannot both implement and say "verified"; DoD and Verified-by cannot be skipped; no proposal is written before the plan is approved; the risk label cannot be assigned silently;
+verification never loops automatically more than once; overlapping `writes:` do not run in parallel; the risk label decides the process even if the task looks small; project knowledge is not embedded in the skill.
 
 ---
 
-### Zorlama: faz makinesi
+### Enforcement: phase machine
 
-Akışın sırası skill metnine değil mekanizmaya bağlıdır. `scripts/sdd.sh` fazı tutar (`intake → proposed → red → green → verified → pr → done`),
-her geçişin kapısını **kendisi** denetler, hook'lar da durumu okuyup uygunsuz adımı engeller.
+The order of the flow depends on a mechanism, not on the skill text. `scripts/sdd.sh` holds the phase (`intake → proposed → red → green → verified → pr → done`),
+checks the gate of every transition **itself**, and hooks read the state and block an out-of-order step.
 
-F03 ([design-workflow.md](design-workflow.md)): `sdd.sh start --profile small|standard|high-assurance` süreç ağırlığını seçer (varsayılan `standard` = aşağıdaki akış, değişmedi; profil riski ve kapıları düşürmez); `sdd.sh transitions` geçerli geçişleri ve girişlerini, `sdd.sh policy` görevin gerçek kurallarını yazar; reddedilen geçiş durumu değiştirmez ve telemetride `reason` taşır.
+F03 ([design-workflow.md](design-workflow.md)): `sdd.sh start --profile small|standard|high-assurance` chooses the process weight (default `standard` = the flow below, unchanged; a profile does not lower risk or gates); `sdd.sh transitions` prints the valid transitions and their inputs, `sdd.sh policy` the task's actual rules; a rejected transition does not change the state and carries a `reason` in telemetry.
 
-| Geçiş / adım | Kapı |
+| Transition / step | Gate |
 |---|---|
-| `start` | Kullanıcının onayladığı risk etiketi ve proposal yolu verilmeden görev açılmaz |
-| `advance proposed` | `proposal.md`'de maddeli bir "Definition of Done" yoksa (high: `design.md`'de yarış/sıralama/zamanlama bölümü yoksa) reddeder |
-| `advance red` | `--test-cmd` çalıştırılır ve **başarısız** olmalıdır; geçen test kanıt sayılmaz |
-| `advance green` | Aynı komut bu kez **geçmeli** |
-| `advance green` / `verified` | `RISK_FLOOR_GLOBS` doluysa görevin riski, diff'in dokunduğu dosyaların tabanından düşük olamaz (strict reddeder, guided uyarır) |
-| `advance verified` | low: verify komutu geçmeli. medium/high: **mevcut diff** için verifier'dan `PASS` kaydı gerekir |
-| `git push`, `gh pr create`, `glab mr create`, `open-pr.sh` | `verified` fazı ve değişmemiş diff olmadan hook reddeder |
+| `start` | No task is opened without the risk label the user confirmed and the proposal path |
+| `advance proposed` | Rejected if `proposal.md` has no itemized "Definition of Done" (high: if `design.md` has no race/ordering/timing section) |
+| `advance red` | `--test-cmd` is run and must **fail**; a passing test does not count as evidence |
+| `advance green` | The same command must now **pass** |
+| `advance green` / `verified` | If `RISK_FLOOR_GLOBS` is set, the task's risk cannot be below the floor of the files the diff touches (strict rejects, guided warns) |
+| `advance verified` | low: the verify command must pass. medium/high: a verifier `PASS` record for the **current diff** is required |
+| `git push`, `gh pr create`, `glab mr create`, `open-pr.sh` | The hook rejects without the `verified` phase and an unchanged diff |
 
-Karar tek yerde, `sdd.sh gate`'te verilir; Claude hook'ları, Cursor/Gemini/OpenCode adaptörleri ve git `pre-commit`/`pre-push` aynısını sorar, yani kural her host'ta aynıdır. Hook'lar: `guard-phase` (görev yokken ve `intake`'te yalnızca doküman/spec/`.claude/`; `proposed`'da yalnızca test dosyaları),
-`guard-pr` (push/PR kapısı, durum dosyasına elle dokunmayı reddeder), `record-verdict` (verifier bitince `VERDICT` satırını o anki diff
-parmak iziyle kaydeder; uygulayan oturumun beyanı sayılmaz, sonradan yapılan her düzenleme kararı eskitir).
+The decision is made in one place, `sdd.sh gate`; Claude hooks, the Cursor/Gemini/OpenCode adapters and git `pre-commit`/`pre-push` all ask the same thing, so the rule is the same on every host. Hooks: `guard-phase` (with no task and in `intake` only docs/spec/`.claude/`; in `proposed` only test files),
+`guard-pr` (push/PR gate, rejects editing the state file by hand), `record-verdict` (when the verifier finishes, records the `VERDICT` line with the current diff
+fingerprint; the implementing session's claim does not count, and any later edit makes the verdict stale).
 
-`SDD_MODE` (`sdkit.env`): `strict` reddeder (**varsayılan**, boşsa da strict), `guided` hook'ta sorar / git hook'ta uyarır, `off` kapatır. Test dosyası kalıpları `SDD_TEST_GLOBS`,
-her zaman serbest yollar `SDD_FREE_GLOBS` ile değişir. Doğrulama: `tests/sdd.test.sh`.
+`SDD_MODE` (`sdkit.env`): `strict` rejects (**default**, also strict if empty), `guided` asks in the hook / warns in the git hook, `off` disables. Test file patterns are changed with `SDD_TEST_GLOBS`,
+always-free paths with `SDD_FREE_GLOBS`. Tests: `tests/sdd.test.sh`.
 
-**Sunucu tarafı kapı (CI).** Faz durumu git-ignored olduğu için CI onu göremez. `advance verified` bu yüzden `<proje-klasörü>/attestations/<görev>.json`
-yazar (görev, risk, verdict, değişen dosyaların parmak izi, kit sürümü); bunu değişiklikle **commit'lersin**. CI'da `sdd.sh ci-check` çalışır:
-kod değişikliği içeren her diff için o diff'e ait bir kanıt ister, medium/high için verifier `PASS` şart koşar; yalnızca doküman/spec/proje dosyası
-değişiyorsa kanıt aramaz. Doğrulamadan sonra bir dosya değişirse parmak izi tutmaz, yeniden doğrulayıp kanıtı yenilersin. Parmak izi PR'ın
-hedef dalından ayrıldığı noktaya göre hesaplanır, hedef dal ilerlese de değişmez. Şablonlar: `templates/ci/` (`init.sh --ci bitbucket|github`).
-Sınır: kanıt dosyası repoya yazma yetkisi olan biri tarafından üretilebilir; yani kuralı atlamayı zorlaştırır, kötü niyeti engellemez. Güvenmek için
-`attestations/` yolunu CODEOWNERS / zorunlu code review ile koru.
+**Server-side gate (CI).** The phase state is git-ignored, so CI cannot see it. That is why `advance verified` writes `<project-dir>/attestations/<task>.json`
+(task, risk, verdict, fingerprint of the changed files, kit version); you **commit** it with the change. CI runs `sdd.sh ci-check`:
+for every diff that contains a code change it requires an attestation for that diff, and for medium/high it requires a verifier `PASS`; if only docs/spec/project files
+change, it does not look for an attestation. If a file changes after verification the fingerprint no longer matches; you verify again and refresh the attestation. The fingerprint is computed
+from the point where the PR branched off its target branch, so it does not change when the target branch moves on. Templates: `templates/ci/` (`init.sh --ci bitbucket|github|gitlab`).
+Limit: the attestation file can be produced by anyone with write access to the repo; so it makes skipping the rule harder, it does not stop bad intent. To rely on it,
+protect the `attestations/` path with CODEOWNERS / mandatory code review.
 
-**Makine kurulumu ve kayma.** Repoda kit script'leri yoksa (ör. Claude plugin modu) git hook'ları makineye kayıtlı kiti kullanır: `<kit>/bin/install.sh`
-(`--status`, `--uninstall`). Repodaki yönetilen kopyaların kit ile uyumu `sync.sh --check` ile (dosya değiştirmez, kayma varsa çıkış 1) CI'da
-denetlenebilir; `doctor.sh` aynı kontrolü, sürüm farkını, makine kaydını ve CI kapısının varlığını raporlar.
+**Machine install and drift.** If the repo has no kit scripts (e.g. Claude plugin mode), the git hooks use the kit registered on the machine: `<kit>/bin/install.sh`
+(`--status`, `--uninstall`). Whether the managed copies in the repo match the kit can be checked in CI with `sync.sh --check` (changes no files, exit 1 on drift);
+`doctor.sh` reports the same check, the version difference, the machine registration and whether the CI gate exists.
 
-`parse-verdict.sh` verdict için **tek doğrulayıcıdır**; Claude'da `record-verdict` hook'u verifier bitince onu `--record` ile çağırır (biçimi bozuk veya kendiyle çelişen blok kaydedilmez, orkestratöre bildirilir; elle `--record` orada `guard-pr` ile reddedilir). SubagentStop olmayan host'larda orkestratör `parse-verdict.sh --record` çalıştırır (`guard-pr` adaptörlerde `SDKIT_HOST` ile buna izin verir). Tek seferlik atlama: `SDD_SKIP=1` (git hook).
+`parse-verdict.sh` is the **single validator** for the verdict; on Claude the `record-verdict` hook calls it with `--record` when the verifier finishes (a malformed or self-contradicting block is not recorded and is reported to the orchestrator; a manual `--record` there is rejected by `guard-pr`). On hosts without SubagentStop the orchestrator runs `parse-verdict.sh --record` (`guard-pr` allows this in the adapters via `SDKIT_HOST`). One-time skip: `SDD_SKIP=1` (git hook).
 
-Sınır: hook'lar kararlı bir saldırgana karşı değil, yanlış yola sapmaya karşıdır (örneğin `Bash` ile dosya yazmayı
-tam kapatmaz). Claude dışı araçlar ve doğrudan `git push` git hook'larıyla kapsanır; git hook'u `--no-verify` ile atlanabilir, bu yüzden atlanamayan katman CI'dır (aşağıda).
+Limit: hooks guard against straying onto the wrong path, not against a determined attacker (for example they do not fully
+close off writing files via `Bash`). Non-Claude tools and a direct `git push` are covered by the git hooks; a git hook can be skipped with `--no-verify`, so the layer that cannot be skipped is CI (below).
 
-## 5. Skill'ler
+## 5. Skills
 
-| Skill | Ne zaman | Ne yapar |
+| Skill | When | What it does |
 |---|---|---|
-| `spec-driven-dev` | Her yeni görevde | Yukarıdaki akış (analist, plan kapısı, rollerle uygulama, doğrulama) |
-| `incident-to-rule` | Bir hata çözüldükten sonra | Olayı kalıcı bir korumaya çevirir (aşağıda) |
-| `scaffold-init` | Yeni repo kurarken, **bir kez** | Hangi host'lar (Claude/Codex/OpenCode/Cursor/Gemini) diye sorar, `init.sh --host ...` çalıştırır, `openspec init`'i başlatır, `project.md`'yi doldurmada yardım eder, sonunda doctor çalıştırır |
-| `scaffold-doctor` | Kurulum sonrası veya bir şey çalışmıyormuşsa | `doctor.sh` çalıştırır, her `FAIL` için neyi nerede değiştireceğini söyler |
+| `spec-driven-dev` | On every new task | The flow above (analyst, plan gate, implementation with roles, verification) |
+| `incident-to-rule` | After a bug is fixed | Turns the incident into a lasting guard (below) |
+| `scaffold-init` | When setting up a new repo, **once** | Asks which hosts (Claude/Codex/OpenCode/Cursor/Gemini), runs `init.sh --host ...`, starts `openspec init`, helps fill in `project.md`, runs doctor at the end |
+| `scaffold-doctor` | After install, or if something seems not to work | Runs `doctor.sh` and says what to change where for every `FAIL` |
 
 ### incident-to-rule
-Düzeltilen bir hatanın aynı sınıfından tekrar oluşmasını engellemek için, **en güçlü uygun koruma** seçilir (ilk uyan kazanır):
+To stop a fixed bug from coming back in the same class, the **strongest suitable guard** is chosen (first match wins):
 
-1. **Lint kuralı**: bir linter yakalayabiliyorsa `LINT_CONFIG`'e ekle
-2. **Verify politikası**: grep/diff örüntüsüyle yakalanabiliyorsa `<project-dir>/verify.d/` altına çalıştırılabilir dosya ekle
-3. **Regresyon testi**: bir test hatada kırılabiliyorsa
-4. **Hook**: bir araç çağrısı olmadan önce engellenmeli/onaylanmalıysa projeye hook ekle
-5. **Pitfall kaydı**: yukarıdakiler mümkün değilse `known-pitfalls.md`'ye (belirti, kök neden, olay, "diff'te nasıl görülür")
+1. **Lint rule**: if a linter can catch it, add it to `LINT_CONFIG`
+2. **Verify policy**: if a grep/diff pattern can catch it, add an executable file under `<project-dir>/verify.d/`
+3. **Regression test**: if a test can break on the bug
+4. **Hook**: if it must be blocked/approved before a tool call happens, add a hook to the project
+5. **Pitfall entry**: if none of the above is possible, in `known-pitfalls.md` (symptom, root cause, incident, "how it shows up in a diff")
 
-Önce hatayı **genel mekanizma** olarak tarif etmek zorundadır (belirti, kök neden, diff'teki izi). Mekanik koruma, düzyazıdan tercih edilir.
-Koruma, orijinal hatayı yeniden üreten bir diff'te önce **kırılıp**, düzeltmede **geçerek** doğrulanır. Tasarım kararı gerekiyorsa ADR eklenir.
+It must first describe the bug as a **general mechanism** (symptom, root cause, its trace in the diff). A mechanical guard is preferred over prose.
+The guard is verified by first **breaking** on a diff that reproduces the original bug and then **passing** on the fix. If a design decision is needed, an ADR is added.
 
 ---
 
-## 6. Roller
+## 6. Roles
 
-Roller `core/roles/*.md` altında **araçtan bağımsız** tanımlanır (alanlar: `kind`, `access`, `tier`, `independent`). `bin/build-adapters.sh` bunlardan her host'un rol dosyalarını üretir (Claude `agents/`; `adapters/{codex,opencode,cursor,gemini}/`; host başına 10 dosya: 9 subagent rolü + `verifier-deep`); üretilen dosyaları elle düzenleme, kaynağı düzenle ve betiği çalıştır (`--check` güncel mi diye bakar).
-Subagent rolleri ana oturumdan **ayrı bağlamda** çalışır; konuşma geçmişini görmez, yalnızca devir özetini (`handoff.md`) ve repodaki dosyaları.
+Roles are defined **tool-independently** under `core/roles/*.md` (fields: `kind`, `access`, `tier`, `independent`). `bin/build-adapters.sh` generates every host's role files from them (Claude `agents/`; `adapters/{codex,opencode,cursor,gemini}/`; 10 files per host: 9 subagent roles + `verifier-deep`); do not edit the generated files by hand, edit the source and run the script (`--check` checks whether they are up to date).
+Subagent roles run in a **separate context** from the main session; they do not see the conversation history, only the handoff (`handoff.md`) and the files in the repo.
 
-| Rol | Erişim | Katman | Bağımsız | Görevi |
+| Role | Access | Tier | Independent | Job |
 |---|---|---|---|---|
-| `orchestrator` | oturum | strong | | Akışı yürütür, işi böler, planı ve özeti sahiplenir (ana oturum, subagent değil) |
-| `analyst` | salt okunur | standard | | Görev isteminin eksiksizliğine karar verir; boşluk, varsayım, soru listeler |
-| `scout` | salt okunur | **light** | | Ucuz kod arama: nerede tanımlı, kim çağırıyor; en fazla 15 satır cevap |
-| `engineer` | yalnızca tasarım dosyaları | strong | | Tasarım, seçenekler ve ödünleşimler, ADR, yarış senaryosu, test stratejisi, görev bölünmesi (`writes:`/`after:`) |
-| `developer` | kod | standard | | Anlaşılan tasarım ve testlere göre gerçekleştirir; "doğrulandı" demez, testi zayıflatmaz |
-| `test-writer` | yalnızca test | standard | | Test yazar, üretim koduna dokunmaz |
-| `devsecops` | altyapı/pipeline | standard | | CI/CD, container, IaC, bağımlılık ve secret hijyeni, en az yetki; prod'a dokunmaz, yalnızca dry-run/plan |
-| `reviewer` | salt okunur | standard | evet | Diff'i kural ve pitfall'lara göre inceler |
-| `security-auditor` | salt okunur | standard | evet | Saldırı odaklı inceleme (yetkilendirme, enjeksiyon, sızıntı, pipeline yetkileri) |
-| `verifier` | salt okunur | standard | evet | Bağımsız DoD kapısı (`medium`) |
-| `verifier-deep` | salt okunur | strong | evet | `verifier` ile aynı gövde (kaynakta `deep: strong`), `high` riskte kullanılır; ayrı dosya olarak üretilir |
+| `orchestrator` | session | strong | | Runs the flow, splits the work, owns the plan and the summary (the main session, not a subagent) |
+| `analyst` | read-only | standard | | Judges whether the task prompt is complete; lists gaps, assumptions, questions |
+| `scout` | read-only | **light** | | Cheap code search: where is it defined, who calls it; answer of at most 15 lines |
+| `engineer` | design files only | strong | | Design, options and trade-offs, ADRs, race scenario, test strategy, task split (`writes:`/`after:`) |
+| `developer` | code | standard | | Implements to the agreed design and tests; does not say "verified", does not weaken the test |
+| `test-writer` | tests only | standard | | Writes tests, does not touch production code |
+| `devsecops` | infrastructure/pipeline | standard | | CI/CD, container, IaC, dependency and secret hygiene, least privilege; does not touch prod, dry-run/plan only |
+| `reviewer` | read-only | standard | yes | Reviews the diff against rules and pitfalls |
+| `security-auditor` | read-only | standard | yes | Attack-oriented review (authorization, injection, leaks, pipeline permissions) |
+| `verifier` | read-only | standard | yes | Independent DoD gate (`medium`) |
+| `verifier-deep` | read-only | strong | yes | Same body as `verifier` (`deep: strong` in the source), used at `high` risk; generated as a separate file |
 
-**Katman = maliyet sınıfı.** Roller model adı değil katman (`light`/`standard`/`strong`) bildirir; karşılığı `core/tiers.env`'de (Claude: haiku/sonnet/opus takma adları;
-Codex: `model_reasoning_effort`; OpenCode/Cursor/Gemini: `*_MODEL_<KATMAN>`; modeller boşsa oturumdan miras). Böylece model değişince tek yer güncellenir.
+**Tier = cost class.** Roles declare a tier (`light`/`standard`/`strong`), not a model name; the mapping is in `core/tiers.env` (Claude: haiku/sonnet/opus aliases;
+Codex: `model_reasoning_effort`; OpenCode/Cursor/Gemini: `*_MODEL_<KATMAN>`; if the models are empty, inherited from the session). So when a model changes, one place is updated.
 
-**Görev başına boyut.** Rolün sabit katmanı varsayılandır; `tasks.md`'de görevin isteğe bağlı `size: small|medium|large` alanı varsa katman ona göre seçilir
-(small → light, medium → standard, large → strong). `size:` yoksa rolün kendi katmanı geçerlidir (eski davranış). Alt sınır: bağımsız roller
-(`verifier`, `reviewer`, `security-auditor`) kendi katmanlarının altına inmez, yalnızca yukarı çıkabilir; `high` risk doğrulaması her zaman strong'dur (`verifier-deep`).
-Boyut ölçütleri (dokunulan dosya sayısı, mekanik mi yeni mantık mı, risk, açık tasarım kararı, yarış/sıralama) `skills/spec-driven-dev/references/model-routing.md`'dedir;
-orkestratör boyutları planda (bölüm 5) gösterir, kullanıcı plan onayında değiştirebilir. Seçilen katman devir özetindeki `TIER:` alanıyla gider.
-Claude Code'da orkestratör her `Agent` çağrısında `model` parametresini `CLAUDE_MODEL_<KATMAN>`'dan verir; diğer host'larda rol dosyasındaki model sabit olduğundan,
-görev başına farklı model gerektiren rol `run-role.sh --tier` ile ayrı süreç olarak çalışır.
+**Size per task.** The role's fixed tier is the default; if a task in `tasks.md` has the optional `size: small|medium|large` field, the tier is chosen from it
+(small → light, medium → standard, large → strong). Without `size:` the role's own tier applies (previous behaviour). Floor: independent roles
+(`verifier`, `reviewer`, `security-auditor`) never go below their own tier, only above; `high` risk verification is always strong (`verifier-deep`).
+The size criteria (number of files touched, mechanical vs. new logic, risk, open design decision, race/ordering) are in `skills/spec-driven-dev/references/model-routing.md`;
+the orchestrator shows the sizes in the plan (section 5), and the user can change them at plan approval. The chosen tier travels in the handoff's `TIER:` field.
+In Claude Code the orchestrator passes the `model` parameter from `CLAUDE_MODEL_<KATMAN>` on every `Agent` call; on other hosts the model in the role file is fixed, so
+a role that needs a different model per task runs as a separate process with `run-role.sh --tier`.
 
-**Bağımsızlık kuralı:** gerçekleştiren rol (`developer`, `devsecops`) asla doğrulayan rol olmaz; bağımsız roller (`verifier`, `reviewer`, `security-auditor`)
-gerçekleştiricinin gerekçesini değil yalnızca artifact'ları alır.
+**Independence rule:** the implementing role (`developer`, `devsecops`) is never the verifying role; independent roles (`verifier`, `reviewer`, `security-auditor`)
+receive only the artifacts, not the implementer's reasoning.
 
-**Roller başka rolü çağırmaz.** Bir arama cevaplanamıyorsa rol çıktısını `NEEDS-LOOKUP: <soru>` satırlarıyla bitirir (şu an `analyst` ve `engineer`); orchestrator `scout`'u bir kez çalıştırır ve cevabı yol olarak geri verir.
+**Roles do not call other roles.** If a lookup cannot be answered, the role ends its output with `NEEDS-LOOKUP: <soru>` lines (currently `analyst` and `engineer`); the orchestrator runs `scout` once and hands the answer back as a path.
 
-**Salt okunur roller zorlanır** (yalnız talimatla değil), host'a göre:
+**Read-only roles are enforced** (not just by instructions), per host:
 
-| Host | Mekanizma |
+| Host | Mechanism |
 |---|---|
-| Claude Code | `hooks/guard-readonly.sh` (PreToolUse `Bash\|Edit\|Write\|NotebookEdit`): hook girdisindeki `agent_type`'tan rolü bulur, agent dosyasında `Edit`/`Write` aracı yoksa dosya yazan araçları ve değiştirici shell komutlarını (`>` yönlendirmesi, `rm`, `sed -i`, `git commit/checkout/...`, bağımlılık kurulumu) reddeder. `agent_type` yoksa (ana oturum, eski sürüm) sessizce kapalıdır |
-| OpenCode | Üretilen rol dosyasında `permission:` izin listesi (`edit: deny`, shell için `"*": deny` + `READONLY_SHELL_ALLOW` allow-list'i) |
-| Cursor | Rol dosyasında `readonly: true` |
-| Gemini | Rol dosyasında `tools:` listesi (yazma araçları yok) |
-| Codex | Rol TOML'unda `sandbox_mode = "read-only"` (not: bazı build önbelleklerini de engelleyebilir) |
+| Claude Code | `hooks/guard-readonly.sh` (PreToolUse `Bash\|Edit\|Write\|NotebookEdit`): finds the role from `agent_type` in the hook input; if the agent file has no `Edit`/`Write` tool, it rejects file-writing tools and modifying shell commands (`>` redirection, `rm`, `sed -i`, `git commit/checkout/...`, dependency installs). Without `agent_type` (main session, old version) it is silently off |
+| OpenCode | `permission:` allow-list in the generated role file (`edit: deny`, for the shell `"*": deny` + the `READONLY_SHELL_ALLOW` allow-list) |
+| Cursor | `readonly: true` in the role file |
+| Gemini | `tools:` list in the role file (no write tools) |
+| Codex | `sandbox_mode = "read-only"` in the role TOML (note: it may also block some build caches) |
 
-**`analyst` çıktısı:**
+**`analyst` output:**
 ```
 READINESS: READY|NEEDS-INFO
-BRIEF  (başlık, test edilebilir kriterler, bileşenler, önerilen risk)
-GAPS   - <eksik> | <neden önemli> | <soru> | <önerilen varsayılan>
-ASSUMPTIONS - <varsayım> | <yanlışsa ne bozulur>
+BRIEF  (title, testable criteria, components, proposed risk)
+GAPS   - <missing item> | <why it matters> | <question> | <suggested default>
+ASSUMPTIONS - <assumption> | <what breaks if wrong>
 ```
 
-**`verifier` çıktısı** (format kesindir):
+**`verifier` output** (the format is strict):
 ```
 DOD
-- <madde> | PASS|FAIL | <kanıt>
+- <item> | PASS|FAIL | <evidence>
 FINDINGS
-- CONFIRMED|PLAUSIBLE | <dosya:satır> | <sorun> | <başarısızlık senaryosu>
+- CONFIRMED|PLAUSIBLE | <file:line> | <problem> | <failure scenario>
 VERIFY
-- command: <çalıştırılan> | result: green|red | <özet>
+- command: <what was run> | result: green|red | <summary>
 VERDICT: PASS|BLOCK
 ```
-Kanıtsız madde `FAIL`'dir; bildirilen test yoksa veya maddeyi sınamıyorsa `FAIL`. `CONFIRMED` yalnızca tam satır gösterilebiliyorsa. `<project-dir>/.frozen`'daki bir dosya diff'te
-değişmişse bu `CONFIRMED` iş akışı ihlalidir.
+An item without evidence is `FAIL`; if the reported test does not exist or does not exercise the item, `FAIL`. `CONFIRMED` only if the exact line can be shown. If a file in `<project-dir>/.frozen` changed
+in the diff, that is a `CONFIRMED` workflow violation.
 
-**`reviewer`:** `BLOCKER|MAJOR|MINOR | dosya:satır | kural | sorun | öneri`; linter'ın yakaladığı stil nitlerini raporlamaz.
-**`security-auditor`:** yetkilendirme, kimlik doğrulama, enjeksiyon, gizli bilgi, girdi sınırları, hata sızıntısı, pipeline yetkileri; bulgu yoksa `NO FINDINGS` ve neleri kontrol ettiği.
-**`test-writer`:** DoD maddelerini önce, sonra hata yolları/doğrulama/mutlu yol/kenar durumlar; `TestSubject_Condition_ExpectedResult`; `errors.Is`.
+**`reviewer`:** `BLOCKER|MAJOR|MINOR | file:line | rule | problem | suggestion`; does not report style nits that the linter catches.
+**`security-auditor`:** authorization, authentication, injection, secrets, input limits, error leaks, pipeline permissions; if there are no findings, `NO FINDINGS` and what it checked.
+**`test-writer`:** DoD items first, then error paths/validation/happy path/edge cases; `TestSubject_Condition_ExpectedResult`; `errors.Is`.
 
 ---
 
-## 7. Hook'lar ve guard'lar
+## 7. Hooks and guards
 
-Hook'lar Claude'un araç çağrıları sırasında otomatik çalışır ve model onları atlayamaz. Üç tür sonuç verebilirler:
+Hooks run automatically during Claude's tool calls and the model cannot skip them. They can return three kinds of result:
 
-| Karar | Anlamı |
+| Decision | Meaning |
 |---|---|
-| **deny** | Çağrı yapılmaz, model nedenini görür |
-| **ask** | Çağrı kullanıcı onayına sunulur |
-| **block** (Stop) | Oturum "bitti" diyemez, model düzeltmeye devam eder |
+| **deny** | The call is not made; the model sees the reason |
+| **ask** | The call is put to the user for approval |
+| **block** (Stop) | The session cannot say "done"; the model keeps fixing |
 
-Hook'lar aslen **Claude Code'a özgüdür**. Gemini ve Cursor aynı hook script'lerini `hooks/adapt.sh` kabuğuyla, OpenCode bir JS eklentisiyle çağırır (aşağıda); yine de Stop-verify ve SessionStart gibi olaylar o host'larda yoktur. Her yerde yedek olarak git hook'ları (commit/push anı) vardır (bölüm 16). Hook kararları `settings.json`'daki `allow` kurallarından **üstündür**: `git checkout` izinli olsa bile `guard-git` yanlış dal kaynağını reddeder.
+Hooks are originally **specific to Claude Code**. Gemini and Cursor call the same hook scripts through the `hooks/adapt.sh` shim, OpenCode through a JS plugin (below); still, events such as Stop-verify and SessionStart do not exist on those hosts. Everywhere there are git hooks (at commit/push time) as a fallback (section 16). Hook decisions **override** the `allow` rules in `settings.json`: even if `git checkout` is allowed, `guard-git` rejects a wrong branch source.
 
-| Hook | Olay / eşleşme | Karar | Ne yapar | Ayar | Ne zaman kapalı |
+| Hook | Event / match | Decision | What it does | Setting | When it is off |
 |---|---|---|---|---|---|
-| `session-context.sh` | SessionStart | bilgi | Oturum başında branch, ticket (branch adındaki `ABC-123`), eşleşen OpenSpec change'i, aktif release ve durumu (açık/dondurulmuş) söyler | `BASE_BRANCH_MODE` | Hiç kapanmaz; release bilgisi yalnızca release modunda |
-| `check-tools.sh` | SessionStart | bilgi | Eksik araçları kurulum komutuyla bildirir: `jq`, `git`, (`openspec/` varsa) `openspec` ve stack'in `tools.sh` listesi | `STACK` | Eksik araç yoksa sessiz |
-| `guard-secrets.sh` | PreToolUse: Read, Edit, Write | **deny** | `SECRET_GLOBS` ile eşleşen dosyayı okumayı/yazmayı reddeder | `SECRET_GLOBS` | `SECRET_GLOBS` boşsa |
-| `guard-protected.sh` | PreToolUse: Edit, Write | **ask** | `PROTECTED_PATHS` altındaki bir dosyayı değiştirmeden önce onay ister | `PROTECTED_PATHS` | Boşsa |
-| `frozen-tests.sh` | PreToolUse: Edit, Write | **deny** | `<project-dir>/.frozen` listesindeki test dosyalarının değiştirilmesini engeller | `<project-dir>/.frozen` | Dosya yoksa |
-| `guard-prod.sh` | PreToolUse: Bash | **ask** | Prod cluster'a karşı **değiştirici** `kubectl` komutlarında onay ister | `PROD_KUBE_CLUSTERS` | Boşsa |
-| `guard-git.sh` | PreToolUse: Bash | **deny** / **ask** | Release akışı kurallarını zorlar (aşağıda) | `BASE_BRANCH_MODE=release` | Release modu yoksa |
-| `guard-readonly.sh` | PreToolUse: Bash, Edit, Write, NotebookEdit | **deny** | Salt okunur bir rolün (reviewer, verifier ...) dosya değiştirmesini engeller (bölüm 6) | `agent_type` (hook girdisi) | `agent_type` yoksa |
-| `post-edit-fmt.sh` | PostToolUse: Edit, Write | yok | Yazılan dosyayı stack'in `fmt.sh`'ı ile biçimlendirir (Go: `gofmt`) | `STACK` | Formatlayıcı kurulu değilse no-op |
-| `stop-verify.sh` | Stop | **block** | Commit'siz değişiklikler stack'in hızlı kontrolünde (`--fast`) kırıksa "bitti" demeyi engeller | `VERIFY_CMD` | Verify betiği bulunamazsa |
-| `usage-log.sh` | Stop, SubagentStop | yok | Transkriptten token kullanımını `usage.sh` defterine, `TELEMETRY=1` ile ayrıca `agent.end` olayı olarak (token, araç çağrısı sayısı, tahmini süre) yazar (bölüm 18) | `USAGE_LOG=1` veya `TELEMETRY=1` | ikisi de 1 değilse |
-| `guard-budget.sh` | PreToolUse: Agent | **ask** (strict) / uyarı (guided) | Her subagent açılışını sayar (`state.sh spawn`) ve görev token bütçesini denetler (`usage.sh budget`); sınır aşılınca sorar (bölüm 18) | `MAX_SPAWNS`, `TOKEN_BUDGET_TASK` | İkisi de boşsa, `SDD_MODE=off`, aktif görev yoksa |
-| `result-size.sh` | SubagentStop | yok | Rolün son cevabı `SUBAGENT_RESULT_MAX_LINES` satırdan uzunsa uyarır (engellemez) | `SUBAGENT_RESULT_MAX_LINES` | Boşsa |
-| `check-contract.sh` | PreToolUse: Agent; SubagentStop | **ask** (strict, yalnızca geçersiz devirde) / uyarı | `CONTRACT:` satırı taşıyan devri doğrulayıp kaydeder; alt ajanın son cevabındaki `HANDOFF-RESULT` satırını denetler. Verdict'e ve faza dokunmaz | `CONTRACTS=1` | Boşsa ya da devirde `CONTRACT:` yoksa |
+| `session-context.sh` | SessionStart | info | At session start reports the branch, ticket (`ABC-123` in the branch name), the matching OpenSpec change, the active release and its state (open/frozen) | `BASE_BRANCH_MODE` | Never off; release info only in release mode |
+| `check-tools.sh` | SessionStart | info | Reports missing tools with the install command: `jq`, `git`, `openspec` (if `openspec/` exists) and the stack's `tools.sh` list | `STACK` | Silent if no tool is missing |
+| `guard-secrets.sh` | PreToolUse: Read, Edit, Write | **deny** | Rejects reading/writing a file that matches `SECRET_GLOBS` | `SECRET_GLOBS` | If `SECRET_GLOBS` is empty |
+| `guard-protected.sh` | PreToolUse: Edit, Write | **ask** | Asks for approval before changing a file under `PROTECTED_PATHS` | `PROTECTED_PATHS` | If empty |
+| `frozen-tests.sh` | PreToolUse: Edit, Write | **deny** | Blocks changes to the test files listed in `<project-dir>/.frozen` | `<project-dir>/.frozen` | If the file does not exist |
+| `guard-prod.sh` | PreToolUse: Bash | **ask** | Asks for approval on **modifying** `kubectl` commands against a prod cluster | `PROD_KUBE_CLUSTERS` | If empty |
+| `guard-git.sh` | PreToolUse: Bash | **deny** / **ask** | Enforces the release flow rules (below) | `BASE_BRANCH_MODE=release` | If there is no release mode |
+| `guard-readonly.sh` | PreToolUse: Bash, Edit, Write, NotebookEdit | **deny** | Blocks a read-only role (reviewer, verifier ...) from changing files (section 6) | `agent_type` (hook input) | If there is no `agent_type` |
+| `post-edit-fmt.sh` | PostToolUse: Edit, Write | none | Formats the written file with the stack's `fmt.sh` (Go: `gofmt`) | `STACK` | No-op if the formatter is not installed |
+| `stop-verify.sh` | Stop | **block** | Blocks saying "done" if uncommitted changes are broken in the stack's fast check (`--fast`) | `VERIFY_CMD` | If the verify script cannot be found |
+| `usage-log.sh` | Stop, SubagentStop | none | Writes token usage from the transcript to the `usage.sh` ledger, and with `TELEMETRY=1` also as an `agent.end` event (tokens, tool call count, estimated duration) (section 18) | `USAGE_LOG=1` or `TELEMETRY=1` | If neither is 1 |
+| `guard-budget.sh` | PreToolUse: Agent | **ask** (strict) / warning (guided) | Counts every subagent spawn (`state.sh spawn`) and checks the task token budget (`usage.sh budget`); asks when the limit is exceeded (section 18) | `MAX_SPAWNS`, `TOKEN_BUDGET_TASK` | If both are empty, `SDD_MODE=off`, or there is no active task |
+| `result-size.sh` | SubagentStop | none | Warns (does not block) if the role's last answer is longer than `SUBAGENT_RESULT_MAX_LINES` lines | `SUBAGENT_RESULT_MAX_LINES` | If empty |
+| `check-contract.sh` | PreToolUse: Agent; SubagentStop | **ask** (strict, only on an invalid handoff) / warning | Validates and records a handoff that carries a `CONTRACT:` line; checks the `HANDOFF-RESULT` line in the subagent's last answer. Does not touch the verdict or the phase | `CONTRACTS=1` | If empty, or the handoff has no `CONTRACT:` |
 
-### Ayrıntılar
+### Details
 
-**guard-secrets**: Dosya adına (basename) veya tam yola glob uygular. Varsayılan: `.env*`, `*credentials*`, `*.pem`.
-Yalnızca **dosya araçlarını** kapsar; `cat .env` gibi bir Bash komutunu görmez. O yüzden `settings.json`'daki `deny` listesi de aynı dosyaları `Read` için yasaklar (bkz. bölüm 12).
+**guard-secrets**: Applies the globs to the file name (basename) or the full path. Default: `.env*`, `*credentials*`, `*.pem`.
+It covers only **file tools**; it does not see a Bash command such as `cat .env`. That is why the `deny` list in `settings.json` also forbids `Read` on the same files (see section 12).
 
-**guard-protected**: Yolu proje köküne göre kıyaslar; `PROTECTED_PATHS`'teki bir önekle başlıyorsa onay ister. Mesaj `project.md`'ye yönlendirir
-(örneğin "yalnızca şu koşulda değiştirilebilir").
+**guard-protected**: Compares the path relative to the project root; asks for approval if it starts with a prefix in `PROTECTED_PATHS`. The message points to `project.md`
+(for example "may only be changed under this condition").
 
-**frozen-tests**: `spec-driven-dev` yüksek riskte **[A]** rolü test dosyasını (repoya göre yol, satır başına bir tane) `<project-dir>/.frozen`'a ekler.
-Uygulayıcı bu testi "düzeltmek" yerine kodu düzeltmek zorunda kalır. Görev bitince/bırakılınca dosya silinir. Dosya kişiseldir, git'e girmez.
+**frozen-tests**: At high risk in `spec-driven-dev`, role **[A]** adds the test file (path relative to the repo, one per line) to `<project-dir>/.frozen`.
+The implementer then has to fix the code instead of "fixing" this test. The file is deleted when the task is finished/abandoned. The file is personal, not in git.
 
-**guard-prod**: "Değiştirici" komutlar: `apply, delete, rollout, scale, patch, edit, replace, create, run, set, annotate, label, exec, cp, drain,
-cordon, taint`. `get/describe/logs` serbesttir. Hedef context, komuttaki `--context` veya aktif context'tir; context'in **gösterdiği cluster**
-adı `PROD_KUBE_CLUSTERS` önekleriyle eşleşirse sorar. Cluster adına baktığı için aynı prod'u gösteren tüm context takma adları kapsanır.
+**guard-prod**: "Modifying" commands: `apply, delete, rollout, scale, patch, edit, replace, create, run, set, annotate, label, exec, cp, drain,
+cordon, taint`. `get/describe/logs` are free. The target context is the `--context` in the command or the active context; it asks if the name of the **cluster the context points to**
+matches the `PROD_KUBE_CLUSTERS` prefixes. Because it looks at the cluster name, every context alias that points to the same prod is covered.
 
-**guard-git** (yalnızca `BASE_BRANCH_MODE=release`):
-1. Feature branch'teyken `git merge|pull|rebase` ile **ana branch'i** (`develop`) içeri almayı **reddeder**. Sebep: henüz test'ten geçmemiş işler release paketine sızar.
-2. Ana branch'ten (veya ana branch'teyken başlangıç noktası vermeden) `git checkout -b` / `git switch -c` ile yeni dal açmayı **reddeder**; aktif release branch'ini önerir.
-3. `PROTECTED_BRANCHES`'teki bir env branch'ine doğrudan `git push` için **onay** ister.
-Düzenli ifade tabanlıdır; alışılmadık sözdizimi (alias, betik içinden çağrı) kaçabilir.
+**guard-git** (only with `BASE_BRANCH_MODE=release`):
+1. On a feature branch, **rejects** pulling the **main branch** (`develop`) in with `git merge|pull|rebase`. Reason: work that has not passed test yet leaks into the release package.
+2. **Rejects** creating a new branch with `git checkout -b` / `git switch -c` from the main branch (or while on the main branch without giving a start point); suggests the active release branch.
+3. Asks for **approval** on a direct `git push` to an env branch in `PROTECTED_BRANCHES`.
+It is regex-based; unusual syntax (aliases, calls from inside a script) can slip through.
 
-**guard-readonly**: Komutu `&&`, `||`, `;`, `|` ile bölüp her parçayı denetler; `/dev/null` dışı çıktı yönlendirmesini, `rm/mv/cp/mkdir/touch/tee`, yerinde `sed -i`, repoyu değiştiren `git` komutlarını ve `npm install` gibi kurulumları reddeder. Okuma komutları (`git diff/log/show`, `ls`, `cat`, `grep`, verify, test) serbesttir. Düzenli ifade tabanlıdır: sıkı bir sınır değil, hata önleyicidir.
+**guard-readonly**: Splits the command on `&&`, `||`, `;`, `|` and checks each part; rejects output redirection other than to `/dev/null`, `rm/mv/cp/mkdir/touch/tee`, in-place `sed -i`, `git` commands that change the repo, and installs such as `npm install`. Read commands (`git diff/log/show`, `ls`, `cat`, `grep`, verify, test) are free. It is regex-based: an error preventer, not a strict boundary.
 
-**usage-log**: Hiçbir zaman engellemez; transkript yoksa veya biçim beklenmedikse sessizce çıkar. Ayrıntı bölüm 18.
-(0.5.0'a kadar `hooks.json` ve `settings.copy.json` içinde `SubagentStop` anahtarı iki kez tanımlıydı; JSON'da son tanım kazandığı için alt agent kullanımı hiç yazılmıyordu. Artık tek dizide `record-verdict`, `usage-log`, `result-size` var; `tests/budget.test.sh` anahtarın tekrarlanmadığını denetler.)
+**usage-log**: Never blocks; exits silently if there is no transcript or the format is unexpected. Details in section 18.
+(Up to 0.5.0 the `SubagentStop` key was defined twice in `hooks.json` and `settings.copy.json`; since the last definition wins in JSON, subagent usage was never written. Now `record-verdict`, `usage-log`, `result-size` are in a single array; `tests/budget.test.sh` checks that the key is not repeated.)
 
-**guard-budget**: Yalnızca `MAX_SPAWNS` veya `TOKEN_BUDGET_TASK` doluysa çalışır. En son güncellenen `work/<slug>/state.json` aktif görev sayılır; yoksa sessizdir. Sınır aşıldıysa `strict` modda kullanıcıya sorar, `guided` modda yalnızca uyarı mesajı verir, `off` modda hiçbir şey yapmaz. Eşik altı uyarıda (`TOKEN_BUDGET_WARN_PCT`) izin kararı vermez, yalnızca mesaj yazar; bu yüzden normal izin akışını değiştirmez. Reddedilen bir açılış da sayılır. Kendi hatasında asla engellemez.
+**guard-budget**: Runs only if `MAX_SPAWNS` or `TOKEN_BUDGET_TASK` is set. The most recently updated `work/<slug>/state.json` counts as the active task; if there is none, it is silent. If the limit is exceeded, in `strict` mode it asks the user, in `guided` mode it only prints a warning, in `off` mode it does nothing. For the below-threshold warning (`TOKEN_BUDGET_WARN_PCT`) it gives no permission decision, it only writes a message; so it does not change the normal permission flow. A rejected spawn is counted too. It never blocks on its own error.
 
-**result-size**: Cevabı `last_assistant_message` alanından, yoksa alt agent transkriptinden alır. Yalnızca uyarır; çıktının dosyaya yazılması rol metinleri ve devir özeti (`OUT:`) ile istenir.
+**result-size**: Takes the answer from the `last_assistant_message` field, otherwise from the subagent transcript. It only warns; writing the output to a file is requested by the role texts and the handoff (`OUT:`).
 
-**check-contract**: Ajan sözleşmeleri (F02, [design-contracts.md](design-contracts.md)). PreToolUse'ta `tool_input.prompt` içinde `CONTRACT:` satırı arar (yoksa eski devirdir, sessiz çıkar); varsa `contract.sh issue` ile doğrular ve `work/<görev>/contracts/` altına kaydeder. Geçersizse `strict`'te sorar, `guided`'da uyarır, `off`'ta susar. SubagentStop'ta son mesajı (yoksa transkriptin son metnini) `check-result --record --legacy-ok` ile denetler; geçersizse orkestratöre bir kez `systemMessage` verir. **Hiçbir zaman engellemez, verdict'i kaydetmez, fazı değiştirmez**: bağımsız doğrulama yine `record-verdict` + `parse-verdict` + `sdd.sh` yolundadır. Canlı Claude Code'da koşturulmadı; Cursor/Gemini/OpenCode/Codex için hook yoktur (`run-role.sh` ya da elle `contract.sh`).
+**check-contract**: Agent contracts (F02, [design-contracts.md](design-contracts.md)). On PreToolUse it looks for a `CONTRACT:` line in `tool_input.prompt` (if there is none it is a legacy handoff and it exits silently); if there is one it validates it with `contract.sh issue` and records it under `work/<task>/contracts/`. If invalid, it asks in `strict`, warns in `guided`, stays quiet in `off`. On SubagentStop it checks the last message (otherwise the last text of the transcript) with `check-result --record --legacy-ok`; if invalid, it gives the orchestrator one `systemMessage`. **It never blocks, never records the verdict, never changes the phase**: independent verification still goes through `record-verdict` + `parse-verdict` + `sdd.sh`. Not run on live Claude Code; there is no hook for Cursor/Gemini/OpenCode/Codex (`run-role.sh` or `contract.sh` by hand).
 
-**`adapt.sh <gemini|cursor> <hook>`**: Host'un araç çağrısı JSON'unu (Gemini `read_file/write_file/replace/run_shell_command`, Cursor `beforeShellExecution/beforeReadFile/afterFileEdit/preToolUse`) hook'ların okuduğu Claude biçimine çevirir, hook'u değiştirmeden çalıştırır, `permissionDecision`'ı host'un protokolüne geri çevirir: Gemini deny = çıkış 2 + stderr; Cursor `{"permission":"deny"}`. `ask` desteklemeyen host'ta `ask`, "açık onay gerekir" gerekçeli `deny`'a düşer (Cursor shell'de `ask` desteklenir). OpenCode için `.opencode/plugins/spec-driven-kit-guard.js` aynı hook script'lerini çağırır.
+**`adapt.sh <gemini|cursor> <hook>`**: Converts the host's tool call JSON (Gemini `read_file/write_file/replace/run_shell_command`, Cursor `beforeShellExecution/beforeReadFile/afterFileEdit/preToolUse`) into the Claude format the hooks read, runs the hook unchanged, and converts `permissionDecision` back to the host's protocol: Gemini deny = exit 2 + stderr; Cursor `{"permission":"deny"}`. On a host that does not support `ask`, `ask` falls back to `deny` with the reason "needs explicit approval" (`ask` is supported in the Cursor shell). For OpenCode, `.opencode/plugins/spec-driven-kit-guard.js` calls the same hook scripts.
 
-**stop-verify**: Doğrulama motorunu `--fast --since-head` ile çalıştırır, yani yalnızca **commit'siz** değişiklikleri vet+build eder. Başarısızsa son 30
-satırı modele geri verir ve düzeltmesini ister. `stop_hook_active` kontrolü sayesinde kendi engellemesinden doğan ikinci Stop'ta tekrar engellemez
-(sonsuz döngü yok). Zaman aşımı 180 sn.
+**stop-verify**: Runs the verification engine with `--fast --since-head`, i.e. vets+builds only **uncommitted** changes. On failure it gives the last 30
+lines back to the model and asks it to fix them. Thanks to the `stop_hook_active` check it does not block again on the second Stop caused by its own block
+(no infinite loop). Timeout 180 s.
 
 ---
 
-## 8. Doğrulama motoru ve `verify.d`
+## 8. Verification engine and `verify.d`
 
-Motor iki parçadır: ortak **çekirdek** `scripts/verify-core.sh` ve her stack'in kendi adımları `stacks/<stack>/scripts/steps.sh`. Giriş noktası `stacks/<stack>/scripts/verify.sh` ince bir sarmaldır (çekirdeği bulur, `steps.sh`'ı yükler, `verify_main` çağırır). Hook'lar, skill'ler ve `make verify` hep bunu çağırır.
+The engine has two parts: the shared **core** `scripts/verify-core.sh` and each stack's own steps `stacks/<stack>/scripts/steps.sh`. The entry point `stacks/<stack>/scripts/verify.sh` is a thin wrapper (finds the core, loads `steps.sh`, calls `verify_main`). Hooks, skills and `make verify` all call it.
 
 ```
 verify.sh [--fast] [--since-head] [--no-cache]
-  --fast         yalnızca ucuz kontroller (stack'e göre: vet+build, typecheck, derleme; test ve lint yok)
-  --since-head   yalnızca commit'siz değişiklikler (Stop hook'u bunu kullanır), tüm branch değil
-  --no-cache     yeşil-sonuç önbelleğini yok say
+  --fast         only cheap checks (per stack: vet+build, typecheck, compile; no tests and no lint)
+  --since-head   only uncommitted changes (the Stop hook uses this), not the whole branch
+  --no-cache     ignore the green-result cache
 ```
 
-### Çekirdek ne yapar (sırayla)
-1. **Diff tabanını** bulur (`resolve-base.sh`; release akışında aktif release branch'i, yoksa `origin/BASE_BRANCH`).
-2. Değişen dosyaları toplar: commit'li, staged, staged olmayan ve **takip edilmeyen** dosyalar; stack'in `STACK_SOURCE_RE`'sine uyanları `CHANGED_SRC` yapar. Değişiklik yoksa "nothing changed" ile 0 çıkar.
-3. **Önbellek:** anahtar = tam ağaç durumu (HEAD + diff + takip edilmeyen dosya içeriği + bayraklar + `sdkit.env` + `verify.d` politikaları). Aynı anahtar daha önce **yeşil** bittiyse çıktısı tekrarlanır ("cached"). Başarısızlık asla önbelleğe alınmaz. `<project-dir>/.verify-cache/` altında son 20 girdi tutulur.
-4. `stack_run`: stack'in kontrolleri (aşağıda).
-5. **Proje politikalarını** (`<project-dir>/verify.d/*.sh`) çalıştırır.
-6. Özet satırı: `verify: N failure(s), M warning(s)`. Çıkış kodu 0 yalnızca hata yoksa.
+### What the core does (in order)
+1. Finds the **diff base** (`resolve-base.sh`; in a release flow the active release branch, otherwise `origin/BASE_BRANCH`).
+2. Collects the changed files: committed, staged, unstaged and **untracked** files; those matching the stack's `STACK_SOURCE_RE` become `CHANGED_SRC`. If nothing changed, it exits 0 with "nothing changed".
+3. **Cache:** key = the full tree state (HEAD + diff + untracked file contents + flags + `sdkit.env` + `verify.d` policies). If the same key previously finished **green**, its output is replayed ("cached"). A failure is never cached. The last 20 entries are kept under `<project-dir>/.verify-cache/`.
+4. `stack_run`: the stack's checks (below).
+5. Runs the **project policies** (`<project-dir>/verify.d/*.sh`).
+6. Summary line: `verify: N failure(s), M warning(s)`. Exit code 0 only if there are no failures.
 
-### Stack'ler
-| Stack | Algılama | Kontroller (özet) |
+### Stacks
+| Stack | Detection | Checks (summary) |
 |---|---|---|
-| `go` | `go.mod` | değişen **go.mod modüllerinde** `gofmt`, `go vet`, `go build`; `--fast` değilse `go test ./...` ve `golangci-lint --new-from-rev` (yalnız yeni kod). `SHARED_MODULE` değişirse `DEPENDENT_MODULES_GLOB` modülleri de eklenir; `INTEGRATION_MODULE_GLOB` modülleri vet/build edilir, çalıştırılmaz |
-| `spring-boot` | Maven/Gradle dosyasında Spring Boot | modül başına derleme, `--fast` değilse test ve (yapılandırılmışsa) spotless/checkstyle; wrapper (`./mvnw`, `./gradlew`) önce denenir, `JAVA_BUILD_TOOL` ile zorlanır |
-| `jvm` | Spring olmayan Maven/Gradle dosyası (Java/Kotlin) | `spring-boot` ile aynı motor: modül başına derleme, `--fast` değilse test ve (yapılandırılmışsa) spotless/checkstyle; formatlama `google-java-format` / `ktlint` |
-| `python` | `pyproject.toml`, `setup.py`, `setup.cfg` veya `requirements.txt` | paket başına sözdizimi (`py_compile`); `--fast` değilse `ruff`, yapılandırılmışsa `mypy`, `pytest` (yoksa `unittest`). `uv.lock`/`poetry.lock` varsa araçlar `uv run`/`poetry run` ile, `PY_RUNNER` ile zorlanır. Eksik araç uyarıdır, hata değil |
-| `generic` | hiçbiri (yedek) | `sdkit.env`'deki `VERIFY_FAST_CMD` ve `VERIFY_TEST_CMD` repo kökünde çalışır; ikisi de boşsa yalnızca `verify.d` politikaları çalışır ve uyarı verilir |
-| `nextjs` | `package.json`'da `next` | paket başına typecheck, `--fast` değilse lint ve test; `VERIFY_BUILD` doluysa `next build`; paket yöneticisi lockfile'dan veya `NODE_PM`'den |
-| `react-native` | `package.json`'da `react-native` | typecheck/lint/test; `nextjs` ile `stacks/_node/scripts/node-lib.sh` yardımcısını paylaşır |
+| `go` | `go.mod` | `gofmt`, `go vet`, `go build` in the changed **go.mod modules**; unless `--fast`, `go test ./...` and `golangci-lint --new-from-rev` (new code only). If `SHARED_MODULE` changes, the `DEPENDENT_MODULES_GLOB` modules are added too; `INTEGRATION_MODULE_GLOB` modules are vetted/built, not run |
+| `spring-boot` | Spring Boot in the Maven/Gradle file | per-module compile, unless `--fast` tests and (if configured) spotless/checkstyle; the wrapper (`./mvnw`, `./gradlew`) is tried first, forced with `JAVA_BUILD_TOOL` |
+| `jvm` | Non-Spring Maven/Gradle file (Java/Kotlin) | Same engine as `spring-boot`: per-module compile, unless `--fast` tests and (if configured) spotless/checkstyle; formatting `google-java-format` / `ktlint` |
+| `python` | `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements.txt` | per-package syntax (`py_compile`); unless `--fast`, `ruff`, `mypy` if configured, `pytest` (otherwise `unittest`). If `uv.lock`/`poetry.lock` exists, tools run via `uv run`/`poetry run`, forced with `PY_RUNNER`. A missing tool is a warning, not a failure |
+| `generic` | none (fallback) | `VERIFY_FAST_CMD` and `VERIFY_TEST_CMD` from `sdkit.env` run at the repo root; if both are empty, only the `verify.d` policies run and a warning is given |
+| `nextjs` | `next` in `package.json` | per-package typecheck, unless `--fast` lint and test; `next build` if `VERIFY_BUILD` is set; package manager from the lockfile or `NODE_PM` |
+| `react-native` | `react-native` in `package.json` | typecheck/lint/test; shares the `stacks/_node/scripts/node-lib.sh` helper with `nextjs` |
 
-Her stack şunları sağlar: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`. Sözleşmenin tamamı `stacks/README.md`'de. Tek repoda **tek `STACK`** vardır; birden çok stack'li monorepo kapsam dışıdır.
-Stack kuralı: yalnızca değişeni doğrula, `--fast` gerçekten ucuz olsun, eksik araç `warn` olsun (atlanır), az çıktı ver.
+Every stack provides: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`. The full contract is in `stacks/README.md`. A repo has **a single `STACK`**; a monorepo with multiple stacks is out of scope.
+Stack rule: verify only what changed, keep `--fast` really cheap, a missing tool is a `warn` (skipped), print little output.
 
-### verify.d protokolü
-Projeye özel kontroller, `<project-dir>/verify.d/` içinde **çalıştırılabilir** (`chmod +x`) dosyalardır. Motor hepsini alfabetik sırayla çalıştırır.
+### verify.d protocol
+Project-specific checks are **executable** (`chmod +x`) files in `<project-dir>/verify.d/`. The engine runs all of them in alphabetical order.
 
-- Bir satır `FAIL: <mesaj>` ise hata, `WARN: <mesaj>` ise uyarı sayılır.
-- Hiç `FAIL:` satırı yazmayıp sıfır dışı kodla çıkan politika da hata sayılır.
-- `_` ile başlayan dosyalar yardımcıdır, çalıştırılmaz.
-- Motor şu değişkenleri verir: `VERIFY_ROOT`, `VERIFY_MERGE_BASE`, `VERIFY_CHANGED` (satır satır dosya listesi), `VERIFY_CHANGED_SRC` (Go'da ayrıca `VERIFY_CHANGED_GO`), ve
-  `VERIFY_LIB` (yardımcı fonksiyon dosyası; içinde `added_lines <pathspec...>`: taban sonrası eklenen satırlar, takip edilmeyen dosyalar dahil).
+- A line `FAIL: <mesaj>` counts as a failure, `WARN: <mesaj>` as a warning.
+- A policy that prints no `FAIL:` line but exits non-zero also counts as a failure.
+- Files starting with `_` are helpers and are not run.
+- The engine provides these variables: `VERIFY_ROOT`, `VERIFY_MERGE_BASE`, `VERIFY_CHANGED` (file list, one per line), `VERIFY_CHANGED_SRC` (on Go also `VERIFY_CHANGED_GO`), and
+  `VERIFY_LIB` (helper function file; contains `added_lines <pathspec...>`: lines added after the base, untracked files included).
 
-Örnek (`stacks/<stack>/verify.d.example/`'dan, `init` bunları `.example` uzantısıyla kurar; kullanmak için uzantıyı sil):
+Example (from `stacks/<stack>/verify.d.example/`; `init` installs these with the `.example` extension; remove the extension to use one):
 
 ```bash
 #!/usr/bin/env bash
@@ -472,443 +472,443 @@ echo "$added" | grep -nE 'log\.Printf|fmt\.Println' && echo "FAIL: debug printin
 exit 0
 ```
 
-`init` stack'e göre üç örnek getirir (Go: yasaklı örüntüler `10-`, `.up.sql`/`.down.sql` çifti `20-`, OpenAPI güncellemesi `30-`; diğer stack'lerde yasaklı örüntüler, migration/env/yerel değişiklik ve bağımlılık/OpenAPI örnekleri). Hepsi projenin dizin düzenine göre uyarlanmalıdır.
+`init` brings three examples per stack (Go: forbidden patterns `10-`, `.up.sql`/`.down.sql` pair `20-`, OpenAPI update `30-`; other stacks: forbidden patterns, migration/env/local change, and dependency/OpenAPI examples). All of them must be adapted to the project's directory layout.
 
 ---
 
-## 9. Yardımcı script'ler
+## 9. Helper scripts
 
 ### `scripts/resolve-base.sh`
-Bir branch'in neye göre diff'leneceğini ve **hangi dalın üzerinden açılacağını** yazdırır.
+Prints what a branch is diffed against and **which branch it is created from**.
 
-| Durum | Çıktı |
+| Situation | Output |
 |---|---|
-| `BASE_BRANCH_MODE=release` | HEAD'in türediği **en yeni** `origin/<RELEASE_BRANCH_PREFIX>*` branch'i (çatallanma noktasından sonra en az commit'i olan; eşitlikte yeni olan) |
-| release branch'i yok / mod kapalı | `origin/BASE_BRANCH` |
-| `VERIFY_BASE` ortam değişkeni verilmiş | o değer (her şeyi ezer) |
+| `BASE_BRANCH_MODE=release` | The **newest** `origin/<RELEASE_BRANCH_PREFIX>*` branch HEAD derives from (the one with the fewest commits after the fork point; on a tie, the newer one) |
+| no release branch / mode off | `origin/BASE_BRANCH` |
+| `VERIFY_BASE` environment variable given | that value (overrides everything) |
 
-`--frozen` bayrağı, o release için `freeze/<ad>` etiketi varsa `frozen`, yoksa `open` yazdırır.
+The `--frozen` flag prints `frozen` if a `freeze/<ad>` tag exists for that release, otherwise `open`.
 
 ### `scripts/open-pr.sh`
-Mevcut branch için PR açar: `open-pr.sh "<başlık>" <açıklama-dosyası> [hedef-branch]`. Hedef verilmezse `BASE_BRANCH`.
-Branch önce push edilmiş olmalı. `PR_HOST` yalnızca `bitbucket`'ı bilir; diğer değerler ağa çıkmadan kod 2 ile çıkar ([hosts.md](hosts.md)).
-Kimlik: e-posta `BITBUCKET_EMAIL`, yoksa `git config user.email`; parola `origin` URL'sinden, yoksa `BITBUCKET_TOKEN`, yoksa `PR_TOKEN_REPO`
-(başka bir yerel reponun URL'sinden). Parola hiçbir zaman yazdırılmaz.
+Opens a PR for the current branch: `open-pr.sh "<title>" <description-file> [destination-branch]`. Without a target, `BASE_BRANCH`.
+The branch must be pushed first. `PR_HOST` is `bitbucket` (REST API), `github` (`gh pr create`), `gitlab` (`glab mr create`) or `auto` (picked from the `origin` URL); other values exit with code 2 without going to the network ([hosts.md](hosts.md)).
+Credentials: email from `BITBUCKET_EMAIL`, otherwise `git config user.email`; password from the `origin` URL, otherwise `BITBUCKET_TOKEN`, otherwise `PR_TOKEN_REPO`
+(from the URL of another local repo). The password is never printed.
 
 ### `scripts/guard.sh`
-Araçtan bağımsız guard'lar; git hook'larından (`adapters/git/pre-commit`, `pre-push`) çağrılır. `pre-commit`: stage'li dosyalarda `SECRET_GLOBS` eşleşmesi, `<project-dir>/.frozen`
-listesindeki testler (**reddeder**), `PROTECTED_PATHS` altı (reddeder; onayla sonra `ALLOW_PROTECTED=1`). `pre-push`: `PROTECTED_BRANCHES`'e push (reddeder; `ALLOW_PROTECTED_PUSH=1`)
-ve `verify.sh --fast --since-head` kırmızıysa push'u reddeder (`GUARD_SKIP_VERIFY=1` bilerek atlatır). Claude hook'larındaki "ask" burada "reddet + onay bayrağı"dır; çünkü git hook'u soru soramaz.
+Tool-independent guards; called from the git hooks (`adapters/git/pre-commit`, `pre-push`). `pre-commit`: `SECRET_GLOBS` matches in staged files, tests listed in `<project-dir>/.frozen`
+(**rejects**), anything under `PROTECTED_PATHS` (rejects; after approval `ALLOW_PROTECTED=1`). `pre-push`: push to `PROTECTED_BRANCHES` (rejects; `ALLOW_PROTECTED_PUSH=1`),
+and rejects the push if `verify.sh --fast --since-head` is red (`GUARD_SKIP_VERIFY=1` skips it deliberately). The "ask" in the Claude hooks is "reject + approval flag" here, because a git hook cannot ask a question.
 
 ### `scripts/plan-waves.sh <tasks.md>`
-Görevleri bağımlılık (`after:`) ve yazma kümesine (`writes:`) göre **dalgalara** ayırır. Aynı dalgadaki görevler birbirinden bağımsızdır ve yazma yolları çakışmaz
-(bir yol diğerine eşit veya onun üst dizini ise çakışır). Bilinmeyen id veya döngüde 1 ile çıkar. Görev biçimi bölüm 17'de.
+Splits tasks into **waves** by dependency (`after:`) and write set (`writes:`). Tasks in the same wave are independent of each other and their write paths do not overlap
+(two paths overlap if one equals the other or is its parent directory). Exits 1 on an unknown id or a cycle. Task format in section 17.
 
-### `scripts/worktree.sh add|path|merge|clean|list <görev-id>`
-Paralel görevler için git worktree: `add` HEAD'den `../<repo>-wt/<id>` ve `wt/<branch>/<id>` dalını açar; `path` yolunu yazar (devir özetindeki `WORKTREE:` için); `merge <id> [tasks.md]` önce görevin değişikliklerini `writes:` kümesine karşı denetler (`check-writes.sh`; dışına çıkan görev birleştirilmez), sonra dalı `--no-ff` birleştirir (çakışmada iptal edip çıkar:
-yazma kümeleri yanlıştı, plan düzeltilir); `clean` birleşmiş worktree'leri siler.
+### `scripts/worktree.sh add|path|merge|clean|list <task-id>`
+Git worktrees for parallel tasks: `add` creates `../<repo>-wt/<id>` and the `wt/<branch>/<id>` branch from HEAD; `path` prints its path (for `WORKTREE:` in the handoff); `merge <id> [tasks.md]` first checks the task's changes against its `writes:` set (`check-writes.sh`; a task that goes outside it is not merged), then merges the branch with `--no-ff` (on a conflict it aborts and exits:
+the write sets were wrong, the plan is fixed); `clean` deletes merged worktrees.
 
-### `scripts/check-writes.sh <tasks.md> <görev-id> <base-ref> [head-ref]`
-Görev `writes:` kümesinin dışında dosya değiştirdiyse 1 ile çıkar ve dosyaları listeler. `head-ref` verilirse commit'li değişiklikler, verilmezse çalışma ağacı + takip edilmeyen dosyalar denetlenir. `writes:`'sız görev salt okunurdur. 2: kullanım hatası veya bilinmeyen görev.
+### `scripts/check-writes.sh <tasks.md> <task-id> <base-ref> [head-ref]`
+Exits 1 and lists the files if the task changed files outside its `writes:` set. If `head-ref` is given, committed changes are checked; otherwise the working tree + untracked files. A task without `writes:` is read-only. 2: usage error or unknown task.
 
 ### `scripts/env.sh`
-Çalıştırılmaz, kaynaklanır; her script ve hook kullanır. `sdkit_env_load <kök>` proje klasörünü bulur ve `sdkit.env` + `sdkit.local.env`'i **ayrıştırır** (kabuk olarak çalıştırmaz: `KEY=değer`, tırnaklı değer, `export`, `: "${K:=v}"`, `$AD`/`${AD}`; geri kalanı `dosya:satır` olarak bildirilip yok sayılır; `PATH`, `IFS`, `BASH_*` gibi anahtarlar reddedilir; geçiş notu `upgrading.md`). Ayrıca `sdkit_active_slug` (açık SDD görevi, yoksa en yeni `work/*/state.json`), `sdkit_lock`/`sdkit_unlock` (`mkdir` tabanlı kilit; paralel ajanlar durum ve defteri aynı anda yazar) ve varsayılan stack.
+Not run, sourced; every script and hook uses it. `sdkit_env_load <root>` finds the project dir and **parses** `sdkit.env` + `sdkit.local.env` (does not run them as shell: `KEY=value`, quoted values, `export`, `: "${K:=v}"`, `$AD`/`${AD}`; anything else is reported as `file:line` and ignored; keys such as `PATH`, `IFS`, `BASH_*` are rejected; migration note in `upgrading.md`). Also `sdkit_active_slug` (the open SDD task, otherwise the newest `work/*/state.json`), `sdkit_lock`/`sdkit_unlock` (`mkdir`-based lock; parallel agents write the state and the ledger at the same time) and the default stack.
 
 ### `scripts/state.sh <slug> init|show|get|set|task|retry|path`
-`<project-dir>/work/<slug>/state.json` görev durumu (devam etme için). `task <id> todo|doing|done|blocked`; `retry <id>` ilk seferde 0 çıkıp sayar, hak kullanılmışsa 1 çıkar (tek otomatik deneme kuralı). `jq` gerekir.
+Task state in `<project-dir>/work/<slug>/state.json` (for resuming). `task <id> todo|doing|done|blocked`; `retry <id>` exits 0 the first time and counts it, exits 1 if the retry is used up (single automatic retry rule). Requires `jq`.
 
 ### `scripts/parse-verdict.sh <dosya|-> [--proposal proposal.md]`
-Verifier çıktısını doğrular: `DOD / FINDINGS / VERIFY / VERDICT` sırası, her DoD satırı `PASS|FAIL`, her bulgu `CONFIRMED|PLAUSIBLE`, `VERDICT` kurala uyuyor mu (herhangi bir `FAIL` veya `CONFIRMED` ise `BLOCK`). `--proposal` ile verifier'ın, öneri dosyasındaki DoD kadar maddeyi yargıladığı da denetlenir. Çıkış: 0 PASS, 1 BLOCK, 2 bozuk/tutarsız.
+Validates the verifier output: `DOD / FINDINGS / VERIFY / VERDICT` order, every DoD line `PASS|FAIL`, every finding `CONFIRMED|PLAUSIBLE`, whether `VERDICT` follows the rule (`BLOCK` if any `FAIL` or `CONFIRMED`). With `--proposal` it also checks that the verifier judged as many items as the DoD in the proposal file. Exit: 0 PASS, 1 BLOCK, 2 malformed/inconsistent.
 
 ### `scripts/check-plan-parity.sh <plan.md> <proposal.md> [tasks.md] [--loose]`
-Plan ↔ öneri ↔ görevler eşitliğini deterministik denetler. DoD satırı `D<n>: <metin> | Verified by: <tür>`; varsayılan olarak id, metin ve Verified-by eşleşmeli (`--loose`: yalnız id ve Verified-by). `tasks.md` verilirse plandaki "Execution plan" görevleri `role/writes/after` açısından karşılaştırılır. Çıkış: 0 eşit, 1 fark (yazdırılır), 2 kullanım/DoD bulunamadı.
+Deterministically checks plan ↔ proposal ↔ tasks parity. DoD line `D<n>: <text> | Verified by: <type>`; by default id, text and Verified-by must match (`--loose`: only id and Verified-by). If `tasks.md` is given, the "Execution plan" tasks in the plan are compared on `role/writes/after`. Exit: 0 equal, 1 difference (printed), 2 usage error/DoD not found.
 
 ### `scripts/usage.sh log|report|budget [slug]`
-Token defteri (bölüm 18). `budget [slug]` görevin kullandığı token'ı (`in + out + cache-write`; cache okumaları ucuz olduğu için sayılmaz) `TOKEN_BUDGET_TASK` ile kıyaslar: eşik (`TOKEN_BUDGET_WARN_PCT`, 70) altında çıkış 0, eşikte 3, %100'de 4; bütçe yoksa veya defter boşsa sessiz çıkış 0. `log --role R [--tier --host --model --in --out --cache-read --cache-write --slug --id]`; `USAGE_LOG=1` değilse sessiz no-op (`--force` ile aşılır). `report` rol ve katman başına toplamları, genel toplamı ve önbellek isabet oranını (`cache_read / (in + cache_read + cache_write)`) yazar.
+Token ledger (section 18). `budget [slug]` compares the tokens the task used (`in + out + cache-write`; cache reads are cheap so they are not counted) with `TOKEN_BUDGET_TASK`: below the threshold (`TOKEN_BUDGET_WARN_PCT`, 70) exit 0, at the threshold 3, at 100% 4; if there is no budget or the ledger is empty, silent exit 0. `log --role R [--tier --host --model --in --out --cache-read --cache-write --slug --id]`; silent no-op unless `USAGE_LOG=1` (overridden with `--force`). `report` prints totals per role and tier, the grand total and the cache hit rate (`cache_read / (in + cache_read + cache_write)`).
 
 ### `scripts/telemetry.sh emit|summary|list|validate|archive|run-id`
-Yapılandırılmış olay günlüğü (`work/<slug>/events.jsonl`) ve özeti; `TELEMETRY=1` ile açılır, kapalıyken sessiz no-op'tur. `emit` hiçbir koşulda hata vermez. `summary` bir koşunun durumunu, faz ve ajan sürelerini, token'ı (ölçülen/toplam koşu, kalite etiketiyle), fiyat tablosu varsa tahmini maliyeti, yeniden deneme/hata sayısını ve doğrulama sonuçlarını verir (`--json` makine okunur). Şema, metrik tablosu ve sınırlar: [design-telemetry.md](design-telemetry.md). Benchmark: `bench/run.sh`.
+Structured event log (`work/<slug>/events.jsonl`) and its summary; turned on with `TELEMETRY=1`, a silent no-op when off. `emit` never fails under any condition. `summary` gives a run's status, phase and agent durations, tokens (measured/total runs, with a quality label), estimated cost if there is a price table, retry/failure counts and verification results (`--json` machine-readable). Schema, metric table and limits: [design-telemetry.md](design-telemetry.md). Benchmark: `bench/run.sh`.
 
 ### `scripts/contract.sh issue|check-result|close|pending|status|id`
-Ajan sözleşmeleri (F02, [design-contracts.md](design-contracts.md)): devir (`CONTRACT: 1`, `ID: <görev>/<etiket>`, mevcut `ROLE/READ/SCOPE/OUT` satırları) ve ajanın son satırı `HANDOFF-RESULT/1 | id | role | status | artifacts | blockers | next` deterministik doğrulanır; model çağrısı yok. Kategoriler: `no-result malformed unsupported-version missing-field bad-value inconsistent id-mismatch role-mismatch task-mismatch unknown-id duplicate stale unsafe-path missing-artifact out-of-scope`. Çıkış: 0 geçerli ve `done`, 1 geçerli ama `partial|blocked|failed`, 2 geçersiz; **0 doğrulandı demek değildir** (verdict ve faz `parse-verdict.sh` / `sdd.sh`'ta kalır). `--record` kabulü `work/<görev>/contracts/<etiket>.json`'a yazar (ilk geçerli cevap kazanır, sonrası `duplicate`). `RETRY-OF:` eski kimliği `superseded` yapar. `TELEMETRY=1` ile `contract.check` olayı yazar.
+Agent contracts (F02, [design-contracts.md](design-contracts.md)): the handoff (`CONTRACT: 1`, `ID: <task>/<label>`, the existing `ROLE/READ/SCOPE/OUT` lines) and the agent's last line `HANDOFF-RESULT/1 | id | role | status | artifacts | blockers | next` are validated deterministically; no model call. Categories: `no-result malformed unsupported-version missing-field bad-value inconsistent id-mismatch role-mismatch task-mismatch unknown-id duplicate stale unsafe-path missing-artifact out-of-scope`. Exit: 0 valid and `done`, 1 valid but `partial|blocked|failed`, 2 invalid; **0 does not mean verified** (verdict and phase stay with `parse-verdict.sh` / `sdd.sh`). `--record` writes the acceptance to `work/<task>/contracts/<label>.json` (the first valid answer wins, later ones are `duplicate`). `RETRY-OF:` marks the old id `superseded`. With `TELEMETRY=1` it writes a `contract.check` event.
 
 ### `scripts/workflow.sh policy|contracts|require|gate|announce|profiles`
-İş akışı profilleri ve ajan sözleşmesi politikası (F03, [design-workflow.md](design-workflow.md)). Yalnızca **okur**: görevin `.sdd/state.json`'ından profil ve riski, ayarlardan `CONTRACTS`'ı alır; fazı `sdd.sh`, sözleşmeyi `contract.sh` yönetmeye devam eder. `policy [--json]` görev için geçerli kuralları yazar (profil, doğrulayıcı, sözleşme düzeyi); `contracts --role R` `off|optional|required` yazar; `require` zorunlu sözleşmesi olan bir devirde işaret yoksa 1 ile çıkar (hook ve `run-role.sh` çağırır); `gate green|verified` high-assurance'ta cevapsız/yarım kalmış ajan varsa 1 ile çıkar (`sdd.sh` çağırır). Profiller: `small` (yalnızca low risk, sözleşme yükü yok), `standard` (varsayılan, bugünkü akış), `high-assurance` (her riskte bağımsız doğrulayıcı PASS + yazan/karar veren roller için zorunlu sözleşme). Profil riski ve kapıları asla düşürmez; `sdd.sh start --profile` ile seçilir, görev boyunca sabittir.
+Workflow profiles and agent contract policy (F03, [design-workflow.md](design-workflow.md)). It only **reads**: the profile and risk from the task's `.sdd/state.json`, `CONTRACTS` from the settings; `sdd.sh` keeps managing the phase and `contract.sh` the contract. `policy [--json]` prints the rules that apply to the task (profile, verifier, contract level); `contracts --role R` prints `off|optional|required`; `require` exits 1 if a handoff with a mandatory contract has no marker (called by the hook and `run-role.sh`); `gate green|verified` exits 1 in high-assurance if an agent is unanswered/left partial (called by `sdd.sh`). Profiles: `small` (low risk only, no contract overhead), `standard` (default, today's flow), `high-assurance` (independent verifier PASS at every risk + mandatory contracts for writing/deciding roles). A profile never lowers risk or gates; it is chosen with `sdd.sh start --profile` and is fixed for the whole task.
 
 ### `scripts/memory.sh status|init|add|index|search|stale|autoload|candidates|promote`
-Proje belleği (bölüm 19). `MEMORY=1` değilse hepsi sessiz no-op'tur.
+Project memory (section 19). All are silent no-ops unless `MEMORY=1`.
 
 ### `scripts/lookup-cache.sh get|put|clear <slug> [soru]`
-Scout cevaplarını görev boyunca saklar (`work/<slug>/lookups/`). Cevap yalnızca aynı HEAD ve aynı commit'siz diff için geçerlidir; kod değişince düşer. Soru küçük harfe çevrilip boşlukları sadeleştirilir, böylece yeniden ifade edilen aynı soru isabet eder. `get` isabette cevabı yazar ve 0, ıskada 1 döner.
+Stores scout answers for the duration of the task (`work/<slug>/lookups/`). An answer is valid only for the same HEAD and the same uncommitted diff; it is dropped when the code changes. The question is lowercased and its whitespace normalized, so the same question asked again with different wording hits. `get` prints the answer and returns 0 on a hit, 1 on a miss.
 
-### `scripts/run-role.sh <rol> --handoff F [--cwd D] [--host H] [--tier T] [--model M] [--out F] [--ignore-budget] [--dry-run]`
-`MAX_SPAWNS` / `TOKEN_BUDGET_TASK` doluysa (ve `SDD_MODE` `off` değilse) çalıştırmadan önce açılışı sayar ve bütçeyi denetler; sınırda `strict` modda çıkış 3 ile durur (kullanıcı onayından sonra `--ignore-budget`), `guided` modda uyarıp devam eder. Bir rolü **ayrı başsız süreç** olarak çalıştırır: taze bağlam (yalnızca devir özeti), `--cwd` ile bir dizine (görev worktree'si) sabit, salt okunur rollerde host'un salt okunur kipinde. Rol metni `core/roles/<rol>.md`'den veya `<project-dir>/roles/`'tan gelir; `verifier-deep` strong katman modeliyle koşar. Host sırası: `--host`, bağımsız roller için `VERIFIER_HOST`, sonra `RUN_ROLE_HOST`; model: `--model`, sonra `RUN_ROLE_MODEL_<KATMAN>`; `--tier light|standard|strong` (`small|medium|large` da olur) verilirse katman rolün katmanının yerine geçer (bağımsız rollerde alt sınır: rolün kendi katmanı) ve model ayrıca `core/tiers.env`'deki `<HOST>_MODEL_<KATMAN>`'dan çözülür; Codex'te model yerine `model_reasoning_effort` (`CODEX_EFFORT_<KATMAN>`) değişir. `--tier` yoksa eski davranış aynen sürer. `VERIFIER_HOST` ile verifier başka bir sağlayıcıda koşabilir (gerçek bağımsızlık). CLI yoksa 127. Token kullanımını host'un yazdığı yerde `usage.sh`'a kaydeder. **Bayrak yazımları CLI başına canlı doğrulanmadı:** `--dry-run` ile komutu yazdır ve `<cli> --help` ile karşılaştır.
+### `scripts/run-role.sh <role> --handoff F [--cwd D] [--host H] [--tier T] [--model M] [--out F] [--ignore-budget] [--dry-run]`
+If `MAX_SPAWNS` / `TOKEN_BUDGET_TASK` is set (and `SDD_MODE` is not `off`), it counts the spawn and checks the budget before running; at the limit it stops with exit 3 in `strict` mode (`--ignore-budget` after user approval), in `guided` mode it warns and continues. Runs a role as a **separate headless process**: fresh context (only the handoff), pinned to a directory (the task worktree) with `--cwd`, in the host's read-only mode for read-only roles. The role text comes from `core/roles/<role>.md` or `<project-dir>/roles/`; `verifier-deep` runs with the strong-tier model. Host order: `--host`, `VERIFIER_HOST` for independent roles, then `RUN_ROLE_HOST`; model: `--model`, then `RUN_ROLE_MODEL_<KATMAN>`; if `--tier light|standard|strong` (`small|medium|large` also works) is given, it replaces the role's tier (floor for independent roles: the role's own tier) and the model is also resolved from `<HOST>_MODEL_<KATMAN>` in `core/tiers.env`; on Codex `model_reasoning_effort` (`CODEX_EFFORT_<KATMAN>`) changes instead of the model. Without `--tier` the previous behaviour stays as is. With `VERIFIER_HOST` the verifier can run on another provider (real independence). 127 if the CLI is missing. Records token usage to `usage.sh` where the host writes it. **The flag spellings per CLI are not validated live:** print the command with `--dry-run` and compare it with `<cli> --help`.
 
 ### `scripts/route.sh decide|explain|outcome|classify|registry|capabilities|validate|log`
-Orkestrasyon kararları (F06, [design-routing.md](design-routing.md)): hangi adaptör ve model, hangi bütçeyle, çalıştır / yeniden kullan / yeniden dene / yükselt / dur. Saf kabuk+jq, model çağrısı yok; her karar bir neden kodu taşır.
-`ROUTING=on` iken `run-role.sh` bu kararı **tüketir** (karar `execute|retry|escalate` değilse hiçbir şey başlatmaz: çıkış 3 bütçe, 2 politika reddi, 7 yönlendirme çalıştırmamaya karar verdi; `--rerun <neden>` bilinçli tekrar için).
-`ROUTING=off` (varsayılan) iken `run-role.sh` eskisi gibi çalışır. `route.sh explain --role R` beş satırda kararı gösterir ve hiçbir şey kaydetmez. Kapı rolleri (verifier, reviewer, security-auditor) risk tabanını, zorunluluğu ve kanıt kurallarını asla aşmaz; duran bir BLOCK aynı diff'te başka sağlayıcıyla yeniden yargılanmaz.
+Orchestration decisions (F06, [design-routing.md](design-routing.md)): which adapter and model, with which budget, run / reuse / retry / escalate / stop. Pure shell+jq, no model call; every decision carries a reason code.
+With `ROUTING=on`, `run-role.sh` **consumes** this decision (if the decision is not `execute|retry|escalate` it starts nothing: exit 3 budget, 2 policy rejection, 7 routing decided not to run; `--rerun <neden>` for a deliberate rerun).
+With `ROUTING=off` (default) `run-role.sh` works as before. `route.sh explain --role R` shows the decision in five lines and records nothing. Gate roles (verifier, reviewer, security-auditor) never go past the risk floor, the mandatory gates or the evidence rules; a standing BLOCK is not re-judged on the same diff by another provider.
 
 ### `scripts/verify-core.sh`
-Doğrudan çalıştırılmaz; stack'in `verify.sh`'ı yükler (bölüm 8). `verify-lib.sh` `verify.d` yardımcısıdır (tüm stack'lerde ortak).
+Not run directly; the stack's `verify.sh` loads it (section 8). `verify-lib.sh` is the `verify.d` helper (shared by all stacks).
 
 ### `bin/build-adapters.sh [--check]`
-`core/roles/*.md`'den `agents/*.md` (Claude) ve `adapters/{codex,opencode,cursor,gemini}/` üretir; host başına biçim `bin/emit/<host>.sh`'tadır, host araç/izin adları `core/hosts.env`'de, katman eşlemesi `core/tiers.env`'de. `--check` üretilmiş dosyaların güncel olup olmadığına bakar (yayın öncesi).
+Generates `agents/*.md` (Claude) and `adapters/{codex,opencode,cursor,gemini}/` from `core/roles/*.md`; the per-host format is in `bin/emit/<host>.sh`, host tool/permission names in `core/hosts.env`, the tier mapping in `core/tiers.env`. `--check` checks whether the generated files are up to date (before a release).
 
 ---
 
-## 10. Yapılandırma referansı
+## 10. Configuration reference
 
-### `<project-dir>/sdkit.env` ve `sdkit.local.env`
+### `<project-dir>/sdkit.env` and `sdkit.local.env`
 
-`sdkit.env` ekibin ortak politikasıdır ve commit'lenir. `sdkit.local.env` kişiseldir, git'e girmez, `sdkit.env`'den sonra okunur ve ortak değeri ezer (örneğin kendi makinenizde `MAX_PARALLEL=2`). Aşağıda **(kişisel)** işaretli anahtarlar `sdkit.local.env`'e yazılır; gerisi `sdkit.env`'e. 1.0 öncesi kurulumlarda ikisi de tek `project.env`'dedir.
+`sdkit.env` is the team's shared policy and is committed. `sdkit.local.env` is personal, not in git, read after `sdkit.env`, and overrides the shared value (for example `MAX_PARALLEL=2` on your own machine). Keys marked **(personal)** below go in `sdkit.local.env`; the rest in `sdkit.env`. In pre-1.0 installs both are in a single `project.env`.
 
-| Değişken | Varsayılan | Anlamı |
+| Variable | Default | Meaning |
 |---|---|---|
-| `BASE_BRANCH` | otomatik algılanır | Entegrasyon branch'i (`develop`, `main` ...) |
-| `RISK_FLOOR_GLOBS` | boş (kapalı) | İsteğe bağlı risk tabanı: `seviye:glob,seviye:glob` (örn. `high:services/payments/*,medium:migrations/*.sql`). Diff'in gerçekten dokunduğu dosyalardan en katı eşleşme, görevin risk etiketinin alt sınırıdır; `advance green`/`verified` ve CI (`ci-check`, taban branch'in `sdkit.env`'ini de okur) denetler. Bozuk değer kapalı kalmaz, reddedilir. Ayrıntı: `upgrading.md` |
-| `CONTRACTS` | boş (kapalı) | `1` ise Claude Code hook'u (`check-contract`) `CONTRACT:` taşıyan devirleri ve alt ajan cevaplarındaki `HANDOFF-RESULT` satırını denetler ([design-contracts.md](design-contracts.md)). `run-role.sh` `CONTRACT:` satırlı devri bu ayardan bağımsız denetler. Ekip ayarı (`sdkit.env`) |
-| `STACK` | `go` (tek yerde: `scripts/env.sh`; `doctor` boşsa uyarır) | Stack: `go`, `spring-boot`, `jvm`, `python`, `nextjs`, `react-native`, `generic` (repo başına tek) |
-| `VERIFY_FAST_CMD`, `VERIFY_TEST_CMD` | boş | Yalnızca `generic`: hızlı kontrol ve test komutu (repo kökünde çalışır) |
-| `PY_RUNNER` | boş | Yalnızca `python`: araç öneki (`uv run`, `poetry run`); boşsa lockfile'dan |
-| `VERIFY_CMD` | boş | Boş: plugin'in motoru. Dolu: repoya göre yol (copy modu) |
-| `DIFF_BASE_CMD` | boş | Boş: plugin'in `resolve-base.sh`'ı. Dolu: repoya göre yol |
-| `LINT_CONFIG` | `<project-dir>/golangci.yml` | golangci-lint yapılandırması (repoya göre) |
-| `TRACKER` | `none` | `jira` veya `none` (`none` ise görev serbest metin) |
-| `PR_HOST` | `bitbucket` | PR host'u |
-| `PROTECTED_PATHS` | boş | Virgülle ayrılmış, kök-göreli yol önekleri. `guard-protected` onay ister |
-| `SECRET_GLOBS` | `.env*,*credentials*,*.pem` | `guard-secrets` ile engellenen dosya desenleri |
-| `PROD_KUBE_CLUSTERS` | boş | Prod cluster adı önekleri. **Dolu değilse kubectl guard'ı kapalı** |
-| `BASE_BRANCH_MODE` | boş | `release` ise release-branch akışı açılır (`guard-git`, release-bilinçli taban) |
-| `RELEASE_BRANCH_PREFIX` | `release/` | Release branch öneki |
-| `FREEZE_TAG_PREFIX` | `freeze/` | Dondurma etiketi öneki |
-| `PROTECTED_BRANCHES` | boş | Doğrudan push'a onay isteyen env branch'leri |
-| `SERVICES_DIR` | `services` | Örnek OpenAPI politikasının baktığı dizin |
-| `SHARED_MODULE` | boş | Değişince bağımlılarının da derleneceği paylaşılan Go modülü |
-| `DEPENDENT_MODULES_GLOB` | boş | Bağımlı modüllerin glob'u (`services/*`) |
-| `INTEGRATION_MODULE_GLOB` | `tests/*` | Gerçek altyapıya giden modüller: vet/build edilir, test edilmez (Spring Boot'ta da geçerli; boş = hepsi test edilir) |
-| `NODE_PM` | boş | Node stack'leri: `npm\|pnpm\|yarn\|bun`; boşsa lockfile'dan |
-| `VERIFY_BUILD` | boş | Node stack'leri: tam doğrulamada `next build` vb. çalıştırılsın mı |
-| `JAVA_BUILD_TOOL` | boş | Spring Boot: `maven\|gradle` (algılama yanlışsa) |
-| `USAGE_LOG` **(kişisel)** | `1` | `1` ise token defteri açılır (bölüm 18); boş = kapalı |
-| `TELEMETRY` **(kişisel)** | boş | `1` ise `work/<slug>/events.jsonl` olay günlüğü açılır (bölüm 18, [design-telemetry.md](design-telemetry.md)); boş = kapalı |
-| `EXTRA_REVIEW_SKILLS` | boş | `high` riskte reviewer + security-auditor'a ek host skill'leri, boşlukla ayrılmış (ör. `code-review security-review`) |
-| `ROUTING` | `off` | `on` ise `run-role.sh` adaptör/model/bütçe/yeniden deneme kararını `route.sh`'tan alır; ayrıntılı `ROUTE_*` ayarları ([design-routing.md](design-routing.md) §9): `ROUTE_POLICY`, `ROUTE_FIXED_MODEL`, `ROUTE_DOWNGRADE_LOW`, `ROUTE_FLOOR_*`, `ROUTE_FALLBACK_HOSTS`, `ROUTE_MAX_RETRIES/ESCALATIONS/ATTEMPTS`, `ROUTE_ESCALATE_TO`, `ROUTE_BACKOFF_S`, `ROUTE_PREFER_<ROL>`. Ekip ayarı (`sdkit.env`) |
-| `ROUTE_ROLE_TOKENS`, `ROUTE_TIMEOUT_S`, `ROUTE_BUDGET_COST` **(kişisel)** | boş | Rol başına token, çalıştırma başına saniye, tahmini USD sınırı (parasal sınır her zaman danışma). `TOKEN_BUDGET_TASK`/`MAX_SPAWNS` da `route.sh` tarafından denetlenir |
-| `RUN_ROLE_HOST` **(kişisel)** | boş | `run-role.sh` için varsayılan host (`claude\|codex\|opencode\|cursor\|gemini`) |
-| `VERIFIER_HOST` **(kişisel)** | boş | Bağımsız roller (verifier, reviewer, security-auditor) için host; başka sağlayıcı = gerçek bağımsızlık |
-| `RUN_ROLE_MODEL_LIGHT/STANDARD/STRONG` **(kişisel)** | boş | `run-role.sh` için katman başına host-özel model kimliği |
-| `MAX_PARALLEL` **(kişisel)** | `3` | Aynı anda çalışacak en fazla subagent/süreç; `plan-waves.sh` daha büyük dalgayı böler (pozitif tamsayı; geçersizse 3) |
-| `TOKEN_BUDGET_TASK` **(kişisel)** | boş | Bir görevin en çok kullanacağı token (`in + out + cache-write`); `USAGE_LOG=1` gerekir. Boş = bütçe yok |
-| `TOKEN_BUDGET_WARN_PCT` **(kişisel)** | `70` | Bütçenin bu yüzdesinden itibaren uyarı |
-| `MAX_SPAWNS` **(kişisel)** | boş | Görev başına en çok subagent açılışı; aşılınca `strict` sorar, `guided` uyarır. Boş = sınır yok |
-| `SUBAGENT_RESULT_MAX_LINES` **(kişisel)** | boş | Bir rolün cevabı bundan uzunsa `result-size` uyarır |
-| `MEMORY` | `1` | `1` ise proje belleği açılır (bölüm 19); boş = kapalı (`sdkit init --no-memory`) |
-| `MEMORY_DIR` | `memory` | Girdilerin dizini: `<project-dir>`'e göre veya mutlak yol |
-| `MEMORY_VCS` | `commit` | `commit` = ekip paylaşır, `ignore` = kişisel (`init --memory-vcs` `.gitignore` satırını yazar; sonradan değiştirilebilir) |
-| `MEMORY_AUTOLOAD` **(kişisel)** | `1` | `1` ise oturum hook'u `INDEX.md`'yi bağlama koyar |
-| `MEMORY_INDEX_MAX` **(kişisel)** | `100` | En çok girdi ve en çok enjekte edilen `INDEX.md` satırı |
-| `MEMORY_STALE_DAYS` **(kişisel)** | `90` | `memory.sh stale` bu kadar gündür güncellenmeyen girdileri işaretler |
-| `MEMORY_PROMOTE` **(kişisel)** | `ask` | Kapanışta `MEMORY:` adaylarını kullanıcıya sor (`ask`), hepsini al (`auto`) veya hiçbirini (`off`) |
+| `BASE_BRANCH` | auto-detected | Integration branch (`develop`, `main` ...) |
+| `RISK_FLOOR_GLOBS` | empty (off) | Optional risk floor: `seviye:glob,seviye:glob` (e.g. `high:services/payments/*,medium:migrations/*.sql`). The strictest match among the files the diff actually touches is the lower bound for the task's risk label; checked by `advance green`/`verified` and CI (`ci-check`, which also reads the base branch's `sdkit.env`). A malformed value does not stay off, it is rejected. Details: `upgrading.md` |
+| `CONTRACTS` | empty (off) | If `1`, the Claude Code hook (`check-contract`) checks handoffs that carry `CONTRACT:` and the `HANDOFF-RESULT` line in subagent answers ([design-contracts.md](design-contracts.md)). `run-role.sh` checks a handoff with a `CONTRACT:` line regardless of this setting. Team setting (`sdkit.env`) |
+| `STACK` | `go` (in one place: `scripts/env.sh`; `doctor` warns if empty) | Stack: `go`, `spring-boot`, `jvm`, `python`, `nextjs`, `react-native`, `generic` (one per repo) |
+| `VERIFY_FAST_CMD`, `VERIFY_TEST_CMD` | empty | `generic` only: fast check and test command (run at the repo root) |
+| `PY_RUNNER` | empty | `python` only: tool prefix (`uv run`, `poetry run`); if empty, from the lockfile |
+| `VERIFY_CMD` | empty | Empty: the plugin's engine. Set: path relative to the repo (copy mode) |
+| `DIFF_BASE_CMD` | empty | Empty: the plugin's `resolve-base.sh`. Set: path relative to the repo |
+| `LINT_CONFIG` | `<project-dir>/golangci.yml` | golangci-lint configuration (relative to the repo) |
+| `TRACKER` | `none` | `jira` or `none` (with `none` the task is free text) |
+| `PR_HOST` | `auto` in new `sdkit.env` (script default `bitbucket`) | PR host: `bitbucket`, `github`, `gitlab`, `auto` |
+| `PROTECTED_PATHS` | empty | Comma-separated, root-relative path prefixes. `guard-protected` asks for approval |
+| `SECRET_GLOBS` | `.env*,*credentials*,*.pem` | File patterns blocked by `guard-secrets` |
+| `PROD_KUBE_CLUSTERS` | empty | Prod cluster name prefixes. **If not set, the kubectl guard is off** |
+| `BASE_BRANCH_MODE` | empty | If `release`, the release-branch flow is on (`guard-git`, release-aware base) |
+| `RELEASE_BRANCH_PREFIX` | `release/` | Release branch prefix |
+| `FREEZE_TAG_PREFIX` | `freeze/` | Freeze tag prefix |
+| `PROTECTED_BRANCHES` | empty | Env branches where a direct push needs approval |
+| `SERVICES_DIR` | `services` | Directory the example OpenAPI policy looks at |
+| `SHARED_MODULE` | empty | Shared Go module whose dependents are also built when it changes |
+| `DEPENDENT_MODULES_GLOB` | empty | Glob of the dependent modules (`services/*`) |
+| `INTEGRATION_MODULE_GLOB` | `tests/*` | Modules that go to real infrastructure: vetted/built, not tested (also applies to Spring Boot; empty = all are tested) |
+| `NODE_PM` | empty | Node stacks: `npm\|pnpm\|yarn\|bun`; if empty, from the lockfile |
+| `VERIFY_BUILD` | empty | Node stacks: whether to run `next build` etc. in full verification |
+| `JAVA_BUILD_TOOL` | empty | Spring Boot: `maven\|gradle` (if detection is wrong) |
+| `USAGE_LOG` **(personal)** | `1` | If `1`, the token ledger is on (section 18); empty = off |
+| `TELEMETRY` **(personal)** | empty | If `1`, the `work/<slug>/events.jsonl` event log is on (section 18, [design-telemetry.md](design-telemetry.md)); empty = off |
+| `EXTRA_REVIEW_SKILLS` | empty | Extra host skills for reviewer + security-auditor at `high` risk, space-separated (e.g. `code-review security-review`) |
+| `ROUTING` | `off` | If `on`, `run-role.sh` takes the adapter/model/budget/retry decision from `route.sh`; detailed `ROUTE_*` settings ([design-routing.md](design-routing.md) §9): `ROUTE_POLICY`, `ROUTE_FIXED_MODEL`, `ROUTE_DOWNGRADE_LOW`, `ROUTE_FLOOR_*`, `ROUTE_FALLBACK_HOSTS`, `ROUTE_MAX_RETRIES/ESCALATIONS/ATTEMPTS`, `ROUTE_ESCALATE_TO`, `ROUTE_BACKOFF_S`, `ROUTE_PREFER_<ROL>`. Team setting (`sdkit.env`) |
+| `ROUTE_ROLE_TOKENS`, `ROUTE_TIMEOUT_S`, `ROUTE_BUDGET_COST` **(personal)** | empty | Per-role tokens, seconds per run, estimated USD limit (the money limit is always advisory). `TOKEN_BUDGET_TASK`/`MAX_SPAWNS` are also checked by `route.sh` |
+| `RUN_ROLE_HOST` **(personal)** | empty | Default host for `run-role.sh` (`claude\|codex\|opencode\|cursor\|gemini`) |
+| `VERIFIER_HOST` **(personal)** | empty | Host for the independent roles (verifier, reviewer, security-auditor); another provider = real independence |
+| `RUN_ROLE_MODEL_LIGHT/STANDARD/STRONG` **(personal)** | empty | Host-specific model id per tier for `run-role.sh` |
+| `MAX_PARALLEL` **(personal)** | `3` | Maximum subagents/processes running at the same time; `plan-waves.sh` splits a larger wave (positive integer; 3 if invalid) |
+| `TOKEN_BUDGET_TASK` **(personal)** | empty | The most tokens a task may use (`in + out + cache-write`); needs `USAGE_LOG=1`. Empty = no budget |
+| `TOKEN_BUDGET_WARN_PCT` **(personal)** | `70` | Warn from this percentage of the budget on |
+| `MAX_SPAWNS` **(personal)** | empty | Maximum subagent spawns per task; when exceeded, `strict` asks, `guided` warns. Empty = no limit |
+| `SUBAGENT_RESULT_MAX_LINES` **(personal)** | empty | `result-size` warns if a role's answer is longer than this |
+| `MEMORY` | `1` | If `1`, project memory is on (section 19); empty = off (`sdkit init --no-memory`) |
+| `MEMORY_DIR` | `memory` | Directory of the entries: relative to `<project-dir>` or an absolute path |
+| `MEMORY_VCS` | `commit` | `commit` = shared by the team, `ignore` = personal (`init --memory-vcs` writes the `.gitignore` line; can be changed later) |
+| `MEMORY_AUTOLOAD` **(personal)** | `1` | If `1`, the session hook puts `INDEX.md` into the context |
+| `MEMORY_INDEX_MAX` **(personal)** | `100` | Maximum entries and maximum injected `INDEX.md` lines |
+| `MEMORY_STALE_DAYS` **(personal)** | `90` | `memory.sh stale` flags entries not updated for this many days |
+| `MEMORY_PROMOTE` **(personal)** | `ask` | At closeout, ask the user about the `MEMORY:` candidates (`ask`), take all of them (`auto`) or none (`off`) |
 
-Yalnızca ortam değişkeni olanlar: `VERIFY_BASE` (diff tabanını ez), `VERIFY_POLICY_DIR` (varsayılan `<project-dir>/verify.d`),
-`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `PR_TOKEN_REPO`. Ortam değişkeni, `sdkit.env`'deki varsayılanı ezer (`PR_HOST` için `: "${PR_HOST:=bitbucket}"` biçimi bunu sağlar).
+Environment-only variables: `VERIFY_BASE` (override the diff base), `VERIFY_POLICY_DIR` (default `<project-dir>/verify.d`),
+`BITBUCKET_EMAIL`, `BITBUCKET_TOKEN`, `PR_TOKEN_REPO`. An environment variable overrides the default in `sdkit.env` (for `PR_HOST` the `: "${PR_HOST:=auto}"` form makes this work).
 
-### `<project-dir>/project.md` bölümleri
-Tracker · Branches and PRs (commit scope'ları dahil) · Release flow (opsiyonel) · Verification · Test layout · Protected code · **Risk rubric** · Known pitfalls.
-`scaffold-doctor`, `TODO` kaldıysa veya rubrik yoksa hata verir.
+### `<project-dir>/project.md` sections
+Tracker · Branches and PRs (including commit scopes) · Release flow (optional) · Verification · Test layout · Protected code · **Risk rubric** · Known pitfalls.
+`scaffold-doctor` fails if a `TODO` is left or the rubric is missing.
 
-### Diğer proje dosyaları
-`rules/` (proje kuralları; `init` genel ve Go kurallarını kopyalar, proje düzenler) · `golangci.yml` · `adr/` · `CLAUDE.md` (harita) ·
-`.gitignore` (kişisel dosyalar: `settings.local.json`, `.frozen`, `.cc-writes/`, `scheduled_tasks.lock`, `memory/`, `work/`, `.verify-cache/`). Claude dışı host'lar ayrıca repo köküne `AGENTS.md`, `.agents/skills/`, `.githooks/` ve kendi dizinlerini yazar (bölüm 16).
+### Other project files
+`rules/` (project rules; `init` copies the general and Go rules, the project edits them) · `golangci.yml` · `adr/` · `CLAUDE.md` (map) ·
+`.gitignore` (personal files: `settings.local.json`, `.frozen`, `.cc-writes/`, `scheduled_tasks.lock`, `memory/`, `work/`, `.verify-cache/`). Non-Claude hosts also write `AGENTS.md`, `.agents/skills/`, `.githooks/` and their own directories to the repo root (section 16).
 
 ---
 
-## 11. Kurulum akışları
+## 11. Install flows
 
-### Yeni repo (bir kez, repoyu hazırlayan kişi)
+### New repo (once, by the person setting the repo up)
 ```bash
-git clone <bu-repo> ~/spec-driven-kit
-~/spec-driven-kit/bin/init.sh /yol/repo      # stack ve base branch'i kendi bulur
-# <project-dir>/project.md ve sdkit.env'i doldur, işine yarayan verify.d/*.example dosyalarının uzantısını sil
-~/spec-driven-kit/bin/doctor.sh /yol/repo    # 0 hata olana kadar
-git add <project-dir> .claude && git commit      # <project-dir>: init'in yazdığı klasör
+git clone <this-repo> ~/spec-driven-kit
+~/spec-driven-kit/bin/init.sh /path/repo      # detects the stack and base branch itself
+# fill in <project-dir>/project.md and sdkit.env, remove the extension from the verify.d/*.example files you want
+~/spec-driven-kit/bin/doctor.sh /path/repo    # until there are 0 failures
+git add <project-dir> .claude && git commit      # <project-dir>: the directory init wrote
 ```
-`init.sh` seçenekleri: `--host` (virgüllü liste: `claude,codex,opencode,cursor,gemini`; varsayılan `claude`), `--dir .sdkit` (varsayılan; mevcut eski klasör korunur), `--no-memory`, `--memory-vcs commit|ignore`, `--mode plugin|copy` (yalnızca Claude), `--stack go|spring-boot|jvm|python|nextjs|react-native|generic` (verilmezse sırayla `go`, `spring-boot`, `jvm`, `react-native`, `nextjs`, `python` algılanır; ilk eşleşen kazanır, hiçbiri yoksa `generic`), `--marketplace-url <url>`, `--force`. **Proje tarafı dosyalarını (project.*, rules, settings.json ...) var olsa bile hiçbir zaman ezmez**,
-bir kez yazılır, sonrasında sizindir. `--force` yalnızca copy modunda kit'ten kopyalanan (yönetilen) dosyaları ezer.
+`init.sh` options: `--host` (comma-separated list: `claude,codex,opencode,cursor,gemini`; default `claude`), `--dir .sdkit` (default; an existing legacy directory is kept), `--no-memory`, `--memory-vcs commit|ignore`, `--mode plugin|copy` (Claude only), `--stack go|spring-boot|jvm|python|nextjs|react-native|generic` (if not given, `go`, `spring-boot`, `jvm`, `react-native`, `nextjs`, `python` are detected in this order; the first match wins, `generic` if none), `--marketplace-url <url>`, `--force`. **It never overwrites project-side files (project.*, rules, settings.json ...), even if they exist**;
+they are written once and are yours after that. `--force` overwrites only the (managed) files copied from the kit in copy mode.
 
-### Geliştirici (repo hazırsa)
+### Developer (repo already set up)
 ```bash
 git clone <repo> && cd <repo>
-claude      # güveni ve plugin'i kabul et
-/spec-driven-dev <ticket veya açıklama>
+claude      # accept trust and the plugin
+/spec-driven-dev <ticket or description>
 ```
-İstem çıkmazsa: `/plugin marketplace add <bu-repo-url>` ve `/plugin install spec-driven-kit@spec-driven-kit`.
+If the prompt does not appear: `/plugin marketplace add <bu-repo-url>` and `/plugin install spec-driven-kit@spec-driven-kit`.
 
-### `doctor.sh` neleri kontrol eder
-`jq`, git deposu · `sdkit.env` yüklenebiliyor mu, `BASE_BRANCH` var mı, `VERIFY_CMD` çalıştırılabilir mi · `project.md` doldurulmuş mu, risk rubriği var mı ·
-`known-pitfalls.md`, `CLAUDE.md`, `<project-dir>/.gitignore` · aktif `verify.d` politikası var mı (yoksa uyarı) · `settings.json` geçerli ve `deny` listesi var mı ·
-plugin modunda plugin etkin ve marketplace adresi tanımlı mı, copy modunda hook'lar bağlı mı · Claude dışı host'lar: `AGENTS.md`, `.agents/skills`, kit script'leri (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) çalıştırılabilir mi, `hooks/adapt.sh`, `core.hooksPath`, kurulu host için rol dosyaları (`.codex/agents`, `.opencode/agents` + guard eklentisi, `.cursor/agents` + geçerli `hooks.json`, `.gemini/agents` + geçerli `settings.json`) · her host'un CLI'ı kurulu mu (yalnız uyarı: yalnızca `run-role.sh` ister) · stack'in `tools.sh` listesi (`required` eksikse hata, `optional` eksikse uyarı) ve `openspec`.
+### What `doctor.sh` checks
+`jq`, git repository · whether `sdkit.env` loads, `BASE_BRANCH` exists, `VERIFY_CMD` is executable · whether `project.md` is filled in and has a risk rubric ·
+`known-pitfalls.md`, `CLAUDE.md`, `<project-dir>/.gitignore` · whether there is an active `verify.d` policy (warning if not) · whether `settings.json` is valid and has a `deny` list ·
+in plugin mode whether the plugin is enabled and the marketplace address is defined, in copy mode whether the hooks are wired · non-Claude hosts: `AGENTS.md`, `.agents/skills`, whether kit scripts (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) are executable, `hooks/adapt.sh`, `core.hooksPath`, role files for the installed host (`.codex/agents`, `.opencode/agents` + guard plugin, `.cursor/agents` + valid `hooks.json`, `.gemini/agents` + valid `settings.json`) · whether each host's CLI is installed (warning only: only `run-role.sh` needs it) · the stack's `tools.sh` list (failure if a `required` one is missing, warning if an `optional` one is missing) and `openspec`.
 
-### `upgrade.sh` (güncelleme)
-Kit'i kullanan bir projeyi yeni sürüme taşır: host'ları (`.codex/`, `.opencode/agents`, `.cursor/agents`, `.gemini/agents` varlığından; eski 0.3 Codex düzeni için `AGENTS.md`/`.agents/skills`), mod ve stack'i algılar, yeni dosyaları ekler (var olanlara dokunmaz), `.gitignore`'a eksik satırları ekler, copy veya Claude dışı kurulumlarda `sync.sh` çalıştırır, `doctor.sh` ile bitirir. Plugin tarafı ayrıca `/plugin` ile yenilenir. Ayrıntı ve sürüme göre elle yapılacaklar: [upgrading.md](upgrading.md). **Copy modundaki Claude projeleri:** `.claude/settings.json` proje sahipliğinde olduğu için yeni hook'lar (PreToolUse `Bash|Edit|Write|NotebookEdit` için `guard-readonly`, Stop ve SubagentStop için `usage-log`) elle birleştirilmelidir; kaynak `templates/settings.copy.json`.
+### `upgrade.sh` (updating)
+Moves a project that uses the kit to the new version: detects the hosts (from the presence of `.codex/`, `.opencode/agents`, `.cursor/agents`, `.gemini/agents`; `AGENTS.md`/`.agents/skills` for the old 0.3 Codex layout), the mode and the stack, adds new files (does not touch existing ones), adds missing lines to `.gitignore`, runs `sync.sh` in copy or non-Claude installs, and finishes with `doctor.sh`. The plugin side is refreshed separately with `/plugin`. Details and manual steps per version: [upgrading.md](upgrading.md). **Claude projects in copy mode:** `.claude/settings.json` is owned by the project, so new hooks (`guard-readonly` for PreToolUse `Bash|Edit|Write|NotebookEdit`, `usage-log` for Stop and SubagentStop) must be merged by hand; source `templates/settings.copy.json`.
 
-### `sync.sh` (yalnızca copy modu)
-Kit'te değişiklik olunca projedeki kopyaları günceller. Yerel olarak düzenlenmiş bir dosya, kit'te de değiştiyse üzerine yazmaz: farkı gösterir (`--force` ile kit sürümü alınır).
-
----
-
-## 12. İzin modeli
-
-İki katman birlikte çalışır:
-
-1. **`settings.json` kuralları** (projede commit'li): `permissions.deny` her zaman kazanır: `rm -rf`, `git push --force/-f`, `git reset --hard`,
-   `.env*` / `*.pem` / `*credentials*` okuma. `permissions.allow` rutin komutlara izin verir (Edit/Write, `make`, okuma amaçlı `git`,
-   `git add/commit/push/checkout/switch`, `kubectl get/describe/logs`, `openspec`, `jq`, `ls`, `cat`) ve seçilen stack'in `permissions.txt` desenlerini (ör. Go: `go`; Node: paket yöneticisi; Spring: `mvn`/`gradle`/wrapper) ekler; `init` bunları `settings.json`'a yazar, ki ilk gün izin yağmuru olmasın.
-2. **Hook'lar** (plugin'den): `allow` kuralının üstüne **deny/ask** verebilir. Yani izinli bir komut bile yanlış dal kaynağı gibi bir
-   gerekçeyle reddedilebilir.
-
-Kişisel izinler `settings.local.json`'a gider (git'e girmez).
-
-Güven: Claude Code, bir projeyi **güven onayından** önce yalnızca kullanıcı ayarlarını uygular; o ana kadar projenin `permissions.allow`'ı ve
-projenin tanımladığı plugin devreye girmez. Bu normal davranıştır, kit'in sorunu değil.
+### `sync.sh` (copy mode only)
+Updates the copies in the project when the kit changes. A file edited locally that also changed in the kit is not overwritten: it shows the difference (`--force` takes the kit version).
 
 ---
 
-## 13. Sınırlar ve bilinen eksikler
+## 12. Permission model
 
-- **Codex, OpenCode, Cursor ve Gemini adaptörleri canlı kurulumlarda doğrulanmadı.** Dosya düzenleri her aracın belgelenmiş biçimine göre üretilir; yalnızca Claude Code yolu uçtan uca denendi. Doğrulanmamış noktalar:
-  - Codex: kullandığın sürümde multi-agent özelliğinin açık olduğu ve anahtar adları; salt okunur sandbox build önbelleklerini engelleyebilir.
-  - OpenCode: shell izin anahtarı `shell` mi `bash` mi (eski sürümlerde `bash`; `core/hosts.env` içinde `OPENCODE_SHELL_KEY`), eklenti hook'larının subagent içinde tetiklenip tetiklenmediği.
-  - Cursor: IDE'de hook ve subagent var, CLI'da belgelenmemiş; `--output-format json` token kullanımı vermez (defter bu host'ta boş kalır).
-  - Gemini: subagent'lar deneysel bayrak arkasında olabilir; yazma/düzenleme araç adları (`write_file`, `replace`) ve `context.fileName` dizi biçimi doğrulanmadı.
-  - `run-role.sh` bayrak yazımları CLI başına: `--dry-run` ile yazdır, `<cli> --help` ile karşılaştır.
-  - Görev boyutuna göre model seçimi (`--tier`, `size:`): Codex, OpenCode, Cursor ve Gemini yolları yalnızca `--dry-run` ile sınandı, gerçek model çağrısı yapılmadı. Codex'in `-c model_reasoning_effort=...` bayrağı ve OpenCode'un `anthropic/claude-*-5-5` model kimlikleri canlı kurulumda doğrulanmadı. Cursor ve Gemini için `core/tiers.env` modelleri bilerek boş bırakıldı (kit model adı uydurmaz): doldurulana kadar `--tier` oturumun modelini değiştirmez.
-- **Claude dışı host'larda garantiler daha zayıftır.** Stop-verify ve SessionStart yoktur; secret/frozen/protected/push guard'ları Gemini/Cursor/OpenCode'da araç çağrısında (kabuk/eklenti) çalışsa da bu yolların kendisi denenmemiştir, Codex'te yalnızca commit/push anında (git hook, CI) çalışır. `ask` desteklemeyen host'ta onay istemi `deny`'a düşer. Bağımsız doğrulama subagent desteğine veya `run-role.sh`'a bağlıdır; yoksa ayrı bir oturumda yapılmalıdır.
-- **Proje tarafı klasörü `.sdkit/`'tir** (eski kurulumlarda `.claude` / `.codex` / `.agentkit`); script'ler/hook'lar onu adıyla arayarak bulur, başka bir ad desteklenmez. Claude Code'un kendi dosyaları (`CLAUDE.md`, `settings.local.json`, copy modunda `agents/ skills/ hooks/`) `.claude/` altında kalır.
-- **Token kullanımı:** kit isteğe bağlı defter tutar (`USAGE_LOG=1`, bölüm 18) ama ölçüm host'a bağlıdır; Claude'da hook'tan, `run-role.sh`'ta CLI'ın yazdığı yerden alınır, bazı host'larda eksiktir.
-- **Repo başına bir `STACK`** (`go`, `spring-boot`, `jvm`, `python`, `nextjs`, `react-native`, `generic`). Birden çok stack'li monorepo kapsam dışıdır. Tanınmayan dilde `init` `generic`'e düşer; derleme/test komutlarını `sdkit.env`'e sen yazarsın. Yeni stack için bölüm 14.
-- **Doğrulama önbelleği** yalnızca yeşil sonucu ve tam ağaç durumunu tanır. Ağaç dışı bir şey (ortam, ağ, dış servis, `verify.d` dışında okunan dosya) değiştiyse eski yeşil geçerli görünebilir: şüphede `--no-cache`.
-- **Bitbucket tek PR host'u.** GitHub/GitLab için yalnızca [kurulum notu](hosts.md) var.
-- **Guard'lar düzenli ifade ve basit eşleşmeyle çalışır.** `guard-secrets` Bash'teki `cat .env`'i görmez (bunun için `deny` listesi var); `guard-git` alışılmadık git
-  sözdizimini veya betik içinden çağrıları kaçırabilir; `guard-prod` yalnızca `kubectl`'e bakar; `guard-readonly` bilinmeyen bir yazma komutunu kaçırabilir. Bunlar güvenlik **sınırı** değil, hata önleyici emniyettir.
-- **`stop-verify` yalnızca commit'siz değişikliklerin hızlı kontrolünü** (`--fast`: Go'da vet/build) çalıştırır; testleri ve lint'i çalıştırmaz (hızlı kalsın diye). Tam doğrulama için `verify.sh` (bayraksız).
-- **OpenSpec'e bağımlıdır.** `spec-driven-dev` OpenSpec skill'lerini çağırır; CLI kurulu olmalıdır. OpenSpec dosyaları kit'e dahil değildir.
-- **Plugin kurulum istemi** ilk açılışta, güven onayından sonra beklenir; bazı ortamlarda çıkmayabilir, iki `/plugin` komutu yedektir.
-- **Başsız (`claude -p`) modda** güvenilmeyen projede proje ayarları yok sayılır.
+Two layers work together:
+
+1. **`settings.json` rules** (committed in the project): `permissions.deny` always wins: `rm -rf`, `git push --force/-f`, `git reset --hard`,
+   reading `.env*` / `*.pem` / `*credentials*`. `permissions.allow` allows routine commands (Edit/Write, `make`, read-only `git`,
+   `git add/commit/push/checkout/switch`, `kubectl get/describe/logs`, `openspec`, `jq`, `ls`, `cat`) and adds the chosen stack's `permissions.txt` patterns (e.g. Go: `go`; Node: the package manager; Spring: `mvn`/`gradle`/wrapper); `init` writes them to `settings.json` so there is no flood of permission prompts on day one.
+2. **Hooks** (from the plugin): can give **deny/ask** on top of an `allow` rule. So even an allowed command can be rejected for a reason
+   such as a wrong branch source.
+
+Personal permissions go in `settings.local.json` (not in git).
+
+Trust: before the **trust prompt** for a project, Claude Code applies only the user settings; until then the project's `permissions.allow` and
+the plugin the project defines do not take effect. This is normal behaviour, not a kit problem.
 
 ---
 
-## 14. Genişletme
+## 13. Limits and known gaps
 
-**Projeye özel kontrol eklemek:** `<project-dir>/verify.d/NN-ad.sh` yaz (`FAIL:`/`WARN:` protokolü), `chmod +x`.
-
-**Projeye özel hook eklemek (Claude):** Repoda `.claude/hooks/` altına script, `settings.json`'a bağlantı. Plugin hook'larını tamamlar, onların yerini almaz.
-Script `jq` ile stdin'deki araç çağrısını okur, `permissionDecision` (`deny`/`ask`) JSON'u yazar (bkz. `hooks/lib.sh`: `jget`, `decide`).
-
-**Yeni rol eklemek:** `core/roles/<ad>.md` yaz (`kind`, `access`, `tier`, `independent`), `bin/build-adapters.sh` çalıştır, `core/roles/README.md` tablosunu ve bu rehberin bölüm 6'sını güncelle. Rol, projeye özel hiçbir şey içermemeli.
-
-**Yeni host eklemek:** `bin/emit/<host>.sh` (rol biçimini üretir: `emit_<host>_begin/role`), `core/hosts.env`'e host'un araç/izin adları, `core/tiers.env`'e model katmanı anahtarları, `init.sh`'a `--host` dalı (host dosyaları ve guard bağlaması; gerekirse `hooks/adapt.sh`'a çeviri), `doctor.sh`'a kontroller (rol dosyaları, CLI), `scripts/run-role.sh`'a headless çağrı, `skills/spec-driven-dev/references/hosts.md`'ye bir sütun ekle; sonra `bin/build-adapters.sh` çalıştır ve çıktıyı commit'le.
-
-**Yeni risk ölçütü / kural:** `project.md` rubriği ve `rules/` düzenlenir; kit'e dokunmaya gerek yok.
-
-**Yeni stack eklemek** (sözleşme: `stacks/README.md`): `stacks/<ad>/` altında
-1. `detect.sh` (`$1` bu stack'te bir proje ise 0), `init.sh` içindeki `STACKS` sırasına eklenir
-2. `scripts/steps.sh` (`STACK_SOURCE_RE` ve `stack_run`; çekirdek `scripts/verify-core.sh` bayrakları, önbelleği ve `verify.d`'yi halleder) ve ince `scripts/verify.sh`
-3. `scripts/fmt.sh` (hep 0 çıkar), `scripts/tools.sh` (`required|komut|ipucu`), `permissions.txt`
-4. `rules/`, `verify.d.example/` ve varsa linter yapılandırması
-
-**Kit'i güncellemek:** Bu repoda değişiklik yap, `.claude-plugin/plugin.json` ve `marketplace.json` sürümünü artır, push et. Plugin kullanan repolar
-güncellemeyi `/plugin` ile alır; copy modundakiler `sync.sh` çalıştırır.
+- **The Codex, OpenCode, Cursor and Gemini adapters are not validated on live installs.** The file layouts are generated to each tool's documented format; only the Claude Code path was tried end to end. Unvalidated points:
+  - Codex: that the multi-agent feature is enabled in the version you use, and the key names; the read-only sandbox may block build caches.
+  - OpenCode: whether the shell permission key is `shell` or `bash` (`bash` in old versions; `OPENCODE_SHELL_KEY` in `core/hosts.env`), and whether plugin hooks fire inside subagents.
+  - Cursor: hooks and subagents exist in the IDE, undocumented in the CLI; `--output-format json` gives no token usage (the ledger stays empty on this host).
+  - Gemini: subagents may be behind an experimental flag; the write/edit tool names (`write_file`, `replace`) and the `context.fileName` array format are not validated.
+  - `run-role.sh` flag spellings per CLI: print with `--dry-run`, compare with `<cli> --help`.
+  - Model choice by task size (`--tier`, `size:`): the Codex, OpenCode, Cursor and Gemini paths were tested only with `--dry-run`; no real model call was made. Codex's `-c model_reasoning_effort=...` flag and OpenCode's `anthropic/claude-*-5-5` model ids are not validated on a live install. The `core/tiers.env` models for Cursor and Gemini are deliberately left empty (the kit does not make up model names): until they are filled in, `--tier` does not change the session's model.
+- **Guarantees are weaker on non-Claude hosts.** There is no Stop-verify and no SessionStart; the secret/frozen/protected/push guards run at tool-call time on Gemini/Cursor/OpenCode (shim/plugin), but those paths themselves have not been tried; on Codex they run only at commit/push time (git hook, CI). On a host that does not support `ask`, the approval prompt falls back to `deny`. Independent verification depends on subagent support or `run-role.sh`; otherwise it must be done in a separate session.
+- **The project-side directory is `.sdkit/`** (`.claude` / `.codex` / `.agentkit` in old installs); scripts/hooks find it by looking for it by name, no other name is supported. Claude Code's own files (`CLAUDE.md`, `settings.local.json`, in copy mode `agents/ skills/ hooks/`) stay under `.claude/`.
+- **Token usage:** the kit keeps an optional ledger (`USAGE_LOG=1`, section 18), but measurement depends on the host; on Claude it comes from the hook, in `run-role.sh` from where the CLI writes it, and on some hosts it is missing.
+- **One `STACK` per repo** (`go`, `spring-boot`, `jvm`, `python`, `nextjs`, `react-native`, `generic`). A monorepo with multiple stacks is out of scope. For an unrecognized language `init` falls back to `generic`; you write the build/test commands in `sdkit.env`. For a new stack, section 14.
+- **The verification cache** knows only green results and the full tree state. If something outside the tree changed (environment, network, external service, a file read outside `verify.d`), an old green may look valid: when in doubt, `--no-cache`.
+- **Bitbucket is the only PR host.** For GitHub/GitLab there is only a [setup note](hosts.md).
+- **Guards work with regular expressions and simple matching.** `guard-secrets` does not see `cat .env` in Bash (the `deny` list is there for that); `guard-git` can miss unusual git
+  syntax or calls from inside scripts; `guard-prod` only looks at `kubectl`; `guard-readonly` can miss an unknown write command. These are not a security **boundary**, they are error-preventing safety nets.
+- **`stop-verify` runs only the fast check of uncommitted changes** (`--fast`: vet/build on Go); it does not run tests and lint (to stay fast). For full verification, `verify.sh` (no flags).
+- **It depends on OpenSpec.** `spec-driven-dev` calls the OpenSpec skills; the CLI must be installed. OpenSpec files are not included in the kit.
+- **The plugin install prompt** is expected on first open, after the trust prompt; in some environments it may not appear, and the two `/plugin` commands are the fallback.
+- **In headless (`claude -p`) mode** project settings are ignored in an untrusted project.
 
 ---
 
-## 15. Dosya haritası
+## 14. Extending
+
+**Adding a project-specific check:** write `<project-dir>/verify.d/NN-ad.sh` (`FAIL:`/`WARN:` protocol), `chmod +x`.
+
+**Adding a project-specific hook (Claude):** a script under `.claude/hooks/` in the repo, wired in `settings.json`. It complements the plugin hooks, it does not replace them.
+The script reads the tool call from stdin with `jq` and writes the `permissionDecision` (`deny`/`ask`) JSON (see `hooks/lib.sh`: `jget`, `decide`).
+
+**Adding a new role:** write `core/roles/<ad>.md` (`kind`, `access`, `tier`, `independent`), run `bin/build-adapters.sh`, update the `core/roles/README.md` table and section 6 of this guide. The role must contain nothing project-specific.
+
+**Adding a new host:** `bin/emit/<host>.sh` (generates the role format: `emit_<host>_begin/role`), the host's tool/permission names in `core/hosts.env`, model tier keys in `core/tiers.env`, a `--host` branch in `init.sh` (host files and guard wiring; a translation in `hooks/adapt.sh` if needed), checks in `doctor.sh` (role files, CLI), a headless call in `scripts/run-role.sh`, a column in `skills/spec-driven-dev/references/hosts.md`; then run `bin/build-adapters.sh` and commit the output.
+
+**New risk criterion / rule:** edit the `project.md` rubric and `rules/`; no need to touch the kit.
+
+**Adding a new stack** (contract: `stacks/README.md`): under `stacks/<ad>/`
+1. `detect.sh` (0 if `$1` is a project of this stack), added to the `STACKS` order in `init.sh`
+2. `scripts/steps.sh` (`STACK_SOURCE_RE` and `stack_run`; the core `scripts/verify-core.sh` handles the flags, the cache and `verify.d`) and a thin `scripts/verify.sh`
+3. `scripts/fmt.sh` (always exits 0), `scripts/tools.sh` (`required|komut|ipucu`), `permissions.txt`
+4. `rules/`, `verify.d.example/` and the linter configuration, if any
+
+**Updating the kit:** make the change in this repo, bump the version in `.claude-plugin/plugin.json` and `marketplace.json`, push. Repos that use the plugin
+get the update with `/plugin`; those in copy mode run `sync.sh`.
+
+---
+
+## 15. File map
 
 ```
 spec-driven-kit/
 ├── .claude-plugin/        plugin.json, marketplace.json
 ├── core/
-│   ├── roles/             ARAÇTAN BAĞIMSIZ rol tanımları (kaynak), README.md
-│   ├── tiers.env          katman -> model eşlemesi (Claude, Codex, OpenCode, Cursor, Gemini)
-│   ├── hosts.env          host araç/izin adları (salt okunur shell allow-list'i, Gemini araçları, OpenCode anahtarı)
-│   └── rules/             general, git, test-first, token-economy     (dilden bağımsız)
+│   ├── roles/             TOOL-INDEPENDENT role definitions (source), README.md
+│   ├── tiers.env          tier -> model mapping (Claude, Codex, OpenCode, Cursor, Gemini)
+│   ├── hosts.env          host tool/permission names (read-only shell allow-list, Gemini tools, OpenCode key)
+│   └── rules/             general, git, test-first, token-economy     (language-independent)
 ├── skills/                spec-driven-dev (+ references/), incident-to-rule, scaffold-init, scaffold-doctor
-├── agents/                ÜRETİLMİŞ Claude agent'ları (verifier-deep dahil; core/roles'tan; elle düzenleme)
+├── agents/                GENERATED Claude agents (including verifier-deep; from core/roles; do not edit by hand)
 ├── adapters/
-│   ├── codex/ opencode/   ÜRETİLMİŞ rol dosyaları (+ config.toml.snippet; OpenCode guard eklentisi plugins/)
-│   ├── cursor/ gemini/    ÜRETİLMİŞ rol dosyaları + hooks.json / settings.json
-│   └── git/               pre-commit, pre-push (guard.sh'ı çağırır)
-├── hooks/                 hooks.json (olay bağlantıları) + lib.sh + 17 hook + adapt.sh (Gemini/Cursor kabuğu)
-├── scripts/               env (ayar okuyucu, kilit, aktif görev), sdd, resolve-base, open-pr, guard, plan-waves, worktree, state, parse-verdict, check-plan-parity,
-│                          check-writes, usage, telemetry, contract, workflow, route, memory, lookup-cache, run-role, verify-core, verify-lib   (stack'ten bağımsız)
-├── bench/                 run.sh (benchmark sürücüsü), scenarios/ (4 F01 + 5 sözleşme senaryosu), stub-host/ (simüle modun sahte host CLI'ları); bkz. design-telemetry.md, design-contracts.md
+│   ├── codex/ opencode/   GENERATED role files (+ config.toml.snippet; OpenCode guard plugin plugins/)
+│   ├── cursor/ gemini/    GENERATED role files + hooks.json / settings.json
+│   └── git/               pre-commit, pre-push (call guard.sh)
+├── hooks/                 hooks.json (event wiring) + lib.sh + 17 hooks + adapt.sh (Gemini/Cursor shim)
+├── scripts/               env (settings reader, lock, active task), sdd, resolve-base, open-pr, guard, plan-waves, worktree, state, parse-verdict, check-plan-parity,
+│                          check-writes, usage, telemetry, contract, workflow, route, memory, lookup-cache, run-role, verify-core, verify-lib   (stack-independent)
+├── bench/                 run.sh (benchmark driver), scenarios/ (4 F01 + 5 contract scenarios), stub-host/ (fake host CLIs for simulated mode); see design-telemetry.md, design-contracts.md
 ├── stacks/
-│   ├── README.md          stack sözleşmesi
-│   ├── _node/scripts/     node-lib.sh (nextjs ve react-native ortak)
+│   ├── README.md          stack contract
+│   ├── _node/scripts/     node-lib.sh (shared by nextjs and react-native)
 │   ├── go/                detect.sh, permissions.txt, golangci.yml, rules/, verify.d.example/,
-│   │   └── scripts/       verify.sh (sarmal), steps.sh, fmt.sh, tools.sh
-│   └── spring-boot/ jvm/ python/ nextjs/ react-native/ generic/    aynı yapı
-├── tests/                 run.sh (script duman testleri), sdd.test.sh, shared.test.sh, memory.test.sh, hardening.test.sh, telemetry.test.sh, budget.test.sh, route.test.sh
+│   │   └── scripts/       verify.sh (wrapper), steps.sh, fmt.sh, tools.sh
+│   └── spring-boot/ jvm/ python/ nextjs/ react-native/ generic/    same structure
+├── tests/                 run.sh (script smoke tests), sdd.test.sh, shared.test.sh, memory.test.sh, hardening.test.sh, telemetry.test.sh, budget.test.sh, route.test.sh
 ├── templates/             sdkit.env, project.md, known-pitfalls.md, CLAUDE.md, AGENTS.md, adr/, settings.*.json, claude.gitignore
 ├── bin/                   init.sh, doctor.sh, sync.sh, upgrade.sh, build-adapters.sh, lib.sh, emit/<host>.sh
-└── docs/                  guide.md (bu dosya), cheatsheet.md, hosts.md, README.md
+└── docs/                  guide.md (this file), cheatsheet.md, hosts.md, README.md
 ```
 
-Bir repoda `init.sh` sonrası proje tarafı:
+The project side in a repo after `init.sh`:
 
 ```
-<repo>/.sdkit/             tek proje klasörü; git'te, kişisel ve üretilmiş dosyalar hariç (kendi .gitignore'u)
-├── project.md  known-pitfalls.md  adr/  verify.d/  roles.d/  golangci.yml (yalnız Go)      (git'te)
-├── rules/                 genel + test-first + token-economy + stack kuralları (kopya, proje düzenler)  (git'te)
-├── memory/                proje belleği: INDEX.md + girdiler (MEMORY=1; MEMORY_VCS=ignore ile kişisel)  (git'te)
-├── attestations/          doğrulama kayıtları, CI kapısı için (git'te)
-├── sdkit.env              ekibin ortak ayarları: release akışı, korunan yollar, stack ... (git'te)
-├── sdkit.local.env        KİŞİSEL ayarlar: bütçeler, limitler, memory davranışı, host/model (git'e girmez)
-├── work/<slug>/           plan.md, state.json, notes.md, usage.jsonl, out/, lookups/ (git'e girmez)
-├── scripts/ roles/ hooks/ tiers.env   kit kopyaları, kurulumdan üretilir (git'e girmez; CI için sdd.sh, resolve-base.sh ve env.sh hariç)
-└── .verify-cache/ .frozen .sdd/ .scaffold-*   çalışma zamanı (git'e girmez)
-<repo>/.claude/            (Claude host'u) CLAUDE.md (kit bloğu, git'te), settings.local.json (git'e girmez); copy modunda agents/ skills/ hooks/
-<repo>/AGENTS.md  .agents/skills/  .githooks/                                         (Claude dışı host'lar)
+<repo>/.sdkit/             the single project dir; in git, except personal and generated files (its own .gitignore)
+├── project.md  known-pitfalls.md  adr/  verify.d/  roles.d/  golangci.yml (Go only)      (in git)
+├── rules/                 general + test-first + token-economy + stack rules (copy, the project edits them)  (in git)
+├── memory/                project memory: INDEX.md + entries (MEMORY=1; personal with MEMORY_VCS=ignore)  (in git)
+├── attestations/          verification records, for the CI gate (in git)
+├── sdkit.env              the team's shared settings: release flow, protected paths, stack ... (in git)
+├── sdkit.local.env        PERSONAL settings: budgets, limits, memory behaviour, host/model (not in git)
+├── work/<slug>/           plan.md, state.json, notes.md, usage.jsonl, out/, lookups/ (not in git)
+├── scripts/ roles/ hooks/ tiers.env   kit copies, generated by the install (not in git; except sdd.sh, resolve-base.sh and env.sh, for CI)
+└── .verify-cache/ .frozen .sdd/ .scaffold-*   run time (not in git)
+<repo>/.claude/            (Claude host) CLAUDE.md (kit block, in git), settings.local.json (not in git); in copy mode agents/ skills/ hooks/
+<repo>/AGENTS.md  .agents/skills/  .githooks/                                         (non-Claude hosts)
 <repo>/.codex/{config.toml,agents/}  .opencode/{agents/,plugins/spec-driven-kit-guard.js}
-<repo>/.cursor/{agents/,hooks.json}  .gemini/{agents/,settings.json}               (ilgili host)
+<repo>/.cursor/{agents/,hooks.json}  .gemini/{agents/,settings.json}               (the respective host)
 ```
 
 ---
 
-## 16. Host'lar: Claude Code, Codex, OpenCode, Cursor, Gemini
+## 16. Hosts: Claude Code, Codex, OpenCode, Cursor, Gemini
 
-Kit üç katmandır; hangisinin taşınabilir olduğu bellidir.
+The kit has three layers; which of them is portable is clear.
 
-| Katman | İçerik | Taşınabilirlik |
+| Layer | Content | Portability |
 |---|---|---|
-| **A. Markdown** | Roller, akış (`SKILL.md`), kurallar, `AGENTS.md` | Her araç okur. `SKILL.md` biçimi ortak |
-| **B. CLI script'ler** | `verify.sh`, `resolve-base.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `run-role.sh` ... | Her araç shell'den çağırır |
-| **C. Araca özel bağlama** | Claude hook'ları ve agent dosyaları; Codex/OpenCode/Cursor/Gemini rol dosyaları ve guard bağlaması; git hook'ları | Host'a göre (`bin/emit/<host>.sh`) |
+| **A. Markdown** | Roles, flow (`SKILL.md`), rules, `AGENTS.md` | Every tool reads it. The `SKILL.md` format is shared |
+| **B. CLI scripts** | `verify.sh`, `resolve-base.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `run-role.sh` ... | Every tool calls them from the shell |
+| **C. Tool-specific wiring** | Claude hooks and agent files; Codex/OpenCode/Cursor/Gemini role files and guard wiring; git hooks | Per host (`bin/emit/<host>.sh`) |
 
 | | Claude Code | Codex | OpenCode | Cursor | Gemini CLI |
 |---|---|---|---|---|---|
-| Talimat | `.claude/CLAUDE.md` + skill'ler | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` (`.gemini/settings.json` `context.fileName`) + `.agents/skills/` |
-| Roller | `agents/*.md` (plugin) / `.claude/agents/` | `.codex/agents/*.toml` + `config.toml` | `.opencode/agents/*.md` | `.cursor/agents/*.md` | `.gemini/agents/*.md` |
-| Salt okunur zorlama | `guard-readonly` hook | sandbox `read-only` | `permission:` izin listesi | `readonly: true` | `tools:` listesi |
-| Guard'lar | hook'lar (model atlayamaz) | git hook'ları | JS eklentisi + git hook'ları | `hooks.json` → `adapt.sh cursor` + git hook'ları | `settings.json` hook'ları → `adapt.sh gemini` + git hook'ları |
-| Kit script'leri | plugin kökü veya `<project-dir>/scripts/` | `<project-dir>/scripts/` | aynı | aynı | aynı |
-| Kurulum | `init.sh --host claude` | `--host codex` | `--host opencode` | `--host cursor` | `--host gemini` |
-| Skill çağırma | `/spec-driven-dev` | `$spec-driven-dev` veya `/skills` | host'a göre | host'a göre | host'a göre |
+| Instructions | `.claude/CLAUDE.md` + skills | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` + `.agents/skills/` | `AGENTS.md` (`.gemini/settings.json` `context.fileName`) + `.agents/skills/` |
+| Roles | `agents/*.md` (plugin) / `.claude/agents/` | `.codex/agents/*.toml` + `config.toml` | `.opencode/agents/*.md` | `.cursor/agents/*.md` | `.gemini/agents/*.md` |
+| Read-only enforcement | `guard-readonly` hook | sandbox `read-only` | `permission:` allow-list | `readonly: true` | `tools:` list |
+| Guards | hooks (the model cannot skip them) | git hooks | JS plugin + git hooks | `hooks.json` → `adapt.sh cursor` + git hooks | `settings.json` hooks → `adapt.sh gemini` + git hooks |
+| Kit scripts | plugin root or `<project-dir>/scripts/` | `<project-dir>/scripts/` | same | same | same |
+| Install | `init.sh --host claude` | `--host codex` | `--host opencode` | `--host cursor` | `--host gemini` |
+| Invoking the skill | `/spec-driven-dev` | `$spec-driven-dev` or `/skills` | per host | per host | per host |
 
-`--host` virgüllü liste alır (`claude,codex,...`). Claude dışındaki her host'ta `init` skill'leri `.agents/skills/`'e, kit script'lerini, rol metinlerini ve hook'ları `<project-dir>/{scripts,roles,hooks}`'a, git hook'larını `.githooks/`'e kopyalar. Doğrulanmamış noktalar bölüm 13'te.
+`--host` takes a comma-separated list (`claude,codex,...`). On every host other than Claude, `init` copies the skills to `.agents/skills/`, the kit scripts, role texts and hooks to `<project-dir>/{scripts,roles,hooks}`, and the git hooks to `.githooks/`. Unvalidated points are in section 13.
 
-Host notları:
-- Codex: `.codex/config.toml` proje tarafıdır; var olan dosyanın üzerine yazılmaz, `adapters/codex/config.toml.snippet` elle birleştirilir. Rol TOML'ları `model_reasoning_effort`, `sandbox_mode` ve `developer_instructions` içerir; `model` yalnızca `core/tiers.env`'de `CODEX_MODEL_*` doluysa yazılır.
-- OpenCode: shell izin anahtarı `core/hosts.env`'deki `OPENCODE_SHELL_KEY`'dir (eski sürümlerde `bash`).
-- Cursor/Gemini: var olan `.cursor/hooks.json` veya `.gemini/settings.json` varsa elle birleştir. Guard kararı `ask` desteklemeyen yerde `deny`'a düşer.
-- Proje klasörü her host için `.sdkit/`'tir. Çalışma anında `.sdkit`, `.agentkit`, `.claude`, `.codex` sırasıyla `sdkit.env` (eski kurulumlarda `project.env`) aranır; 1.0 öncesi projeler olduğu gibi çalışır.
-- Her klonda bir kez: `git config core.hooksPath .githooks` (`doctor.sh` uyarır).
+Host notes:
+- Codex: `.codex/config.toml` is project-side; an existing file is not overwritten, `adapters/codex/config.toml.snippet` is merged by hand. Role TOMLs contain `model_reasoning_effort`, `sandbox_mode` and `developer_instructions`; `model` is written only if `CODEX_MODEL_*` is set in `core/tiers.env`.
+- OpenCode: the shell permission key is `OPENCODE_SHELL_KEY` in `core/hosts.env` (`bash` in old versions).
+- Cursor/Gemini: if `.cursor/hooks.json` or `.gemini/settings.json` already exists, merge by hand. Where `ask` is not supported, the guard decision falls back to `deny`.
+- The project dir is `.sdkit/` for every host. At run time `sdkit.env` (`project.env` in old installs) is looked up in `.sdkit`, `.agentkit`, `.claude`, `.codex`, in that order; pre-1.0 projects work as they are.
+- Once per clone: `git config core.hooksPath .githooks` (`doctor.sh` warns).
 
-**Ayrı süreç ve bağımsız sağlayıcı:** `scripts/run-role.sh <rol> --handoff F --host H` bir rolü ayrı başsız CLI süreci olarak çalıştırır (`claude -p`, `codex exec`, `opencode run`, `cursor-agent -p`, `gemini -p`). `VERIFIER_HOST` ile verifier farklı bir sağlayıcıya verilirse bağımsızlık gerçek olur (aynı model ailesi kendi hatasını kaçırmaz).
+**Separate process and independent provider:** `scripts/run-role.sh <role> --handoff F --host H` runs a role as a separate headless CLI process (`claude -p`, `codex exec`, `opencode run`, `cursor-agent -p`, `gemini -p`). If the verifier is given to a different provider with `VERIFIER_HOST`, the independence is real (the same model family misses its own mistakes).
 
-Subagent desteği olmayan host'ta aynı plan sırayla yürütülür; bağımsız doğrulama için taze bir oturum veya `run-role.sh` kullanılır.
+On a host without subagent support the same plan runs sequentially; independent verification uses a fresh session or `run-role.sh`.
 
 ---
 
-## 17. Paralel çalışma
+## 17. Parallel work
 
-Varsayılan **sıralıdır**; paralel koşular token'ı çarpar. Yalnızca risk `medium`/`high`, en az iki görevin yazma kümesi ayrık ve host subagent çalıştırabiliyorsa paralel çalışılır.
+The default is **sequential**; parallel runs multiply tokens. Work runs in parallel only if the risk is `medium`/`high`, at least two tasks have disjoint write sets, and the host can run subagents.
 
-Görev biçimi (`tasks.md` ve plan bölüm 5):
+Task format (`tasks.md` and plan section 5):
 ```
-- [ ] T3 importer'a retry ekle | role: developer | size: medium | writes: services/importer/ | after: T1
+- [ ] T3 add retry to the importer | role: developer | size: medium | writes: services/importer/ | after: T1
 ```
-`size:` isteğe bağlıdır (model katmanı, bölüm 6); `plan-waves.sh` onu çıktıda `T3(developer,medium)` diye gösterir, gruplamayı etkilemez.
-`scripts/plan-waves.sh tasks.md` örnek çıktısı:
+`size:` is optional (model tier, section 6); `plan-waves.sh` shows it in the output as `T3(developer,medium)`, it does not affect grouping.
+Example output of `scripts/plan-waves.sh tasks.md`:
 ```
 wave 1: T1(developer)  ||  T3(devsecops)  ||  T5(developer)
 wave 2: T2(developer)
-wave 3: T4(test-writer)      # T2 ile yazma yolu çakışıyor, sonraya kaldı
+wave 3: T4(test-writer)      # write path overlaps with T2, moved later
 ```
 
-Güvenli paralel çiftler: `test-writer ‖ developer` (test ve arayüz plana sabitlenmişse; developer testi değiştiremez) · ayrık `writes:` olan iki `developer` · `developer ‖ devsecops` ·
-`reviewer ‖ security-auditor` (ikisi de salt okunur). **Asla:** `verifier` ile gerçekleştirici, aynı dosyada iki yazan, birleşmemiş sonuca bağlı iş.
+Safe parallel pairs: `test-writer ‖ developer` (if the test and interface are fixed in the plan; the developer cannot change the test) · two `developer`s with disjoint `writes:` · `developer ‖ devsecops` ·
+`reviewer ‖ security-auditor` (both read-only). **Never:** `verifier` with the implementer, two writers on the same file, work that depends on an unmerged result.
 
-İzolasyon **kit'e aittir**, host'un yerel worktree özelliğine bağlı değildir (böylece her host'ta aynı çalışır): her yazan görev kendi worktree'sinde çalışır (`worktree.sh add T3`), yolu `worktree.sh path T3` ile alınıp devir özetine `WORKTREE:` olarak yazılır ve rol yalnızca o yol altında okur/yazar; host rolü bir dizine sabitleyemiyorsa `run-role.sh --cwd` kullanılır. Orchestrator dalga dalga birleştirir: `worktree.sh merge T3 tasks.md` önce `check-writes.sh` ile görevin `writes:` kümesinin dışına çıkıp çıkmadığına bakar (çıktıysa birleştirmez), sonra birleştirir; her birleştirmeden sonra `verify --fast` çalıştırır ve ancak sonra sonraki dalgaya geçer.
-`high` riskte reviewer ve security-auditor paralel çalışır (`EXTRA_REVIEW_SKILLS` doluysa host skill'leri de). Birleştirme çakışması yazma kümelerinin yanlış olduğu demektir: dur, kullanıcıya söyle, planı düzelt. Aynı anda en fazla `MAX_PARALLEL` (varsayılan 3) subagent: `plan-waves.sh` daha büyük bir dalgayı böler, sığmayan görevler sonraki dalgaya kalır.
-
----
-
-## 18. Token ekonomisi
-
-Hedef: judgement gereken yerde harcamak; arama, yeniden yazma ve yeniden okumada harcamamak. Kurallar `core/rules/token-economy.md`'dedir (projeye kopyalanır); özeti:
-
-| Kaldıraç | Nasıl |
-|---|---|
-| Doğru boyutlu rol | Arama `scout` (light), planlama kontrolü `analyst`, tasarım ve `high` doğrulama (`verifier-deep`) strong, geri kalanı standard. Roller katman bildirir, model adı değil |
-| Ucuz olan önce | `verify.sh` LLM incelemesinden önce; kırmızıysa pahalı okuma yok |
-| Tekrar etme | Yeşil doğrulama önbelleği: Stop hook'u, verifier ve PR adımı aynı ağaç için işi tekrarlamaz (`--no-cache` ile atlanır) |
-| Script, LLM değil | Plan eşitliği (`check-plan-parity.sh`), verdict doğrulaması (`parse-verdict.sh`), yazma kümesi (`check-writes.sh`), deneme sınırı (`state.sh retry`) deterministik script'tir |
-| Artifact devri | Alt role konuşma değil, yol içeren kısa devir özeti (`handoff.md`). Bağımsız roller zaten gerçekleştiricinin gerekçesini almaz, bu bağlamı da küçük tutar |
-| Çıktıyı kırp | Komutun özet satırı + başarısız satırlar (`tail -40`); roller yapılandırılmış blok + en fazla 15 satır döner |
-| Dar oku | Sembolü grep'le, gereken satırları aç; dosyanın çoğunu değiştirmiyorsan tamamını okuma |
-| İsteğe bağlı yükleme | `SKILL.md` kısa; `references/` yalnızca ilgili adımda okunur |
-| Derinlik riske göre | `low`: engineer çalışması, bağımsız doğrulayıcı ve paralel dalga yok; analist `low`'da da çalışır (ucuz, tutarlı). `NEEDS-LOOKUP` ile rol zincirleri yerine tek `scout` koşusu |
-| Paralel yalnızca kazandırıyorsa | Ayrık yazma kümeleri veya salt okunur incelemeler, en fazla `MAX_PARALLEL` (3) eşzamanlı |
-| Bir deneme, sonra sor | İkinci otomatik tekrar token yakar ve nadiren işe yarar |
-| Gerektiğinde aç | Bir veya iki dosyalık iş yerinde yapılır; roller rol açmaz. Karar tablosu: `references/delegation.md` |
-| Sonuç kısa ve dosyada | Rol en çok 15 satır + yapılandırılmış blok döner; uzun hali `work/<slug>/out/` altında. Aynı scout sorusu `lookup-cache.sh` ile tekrar ödenmez |
-| Bütçe | `MAX_SPAWNS`, `TOKEN_BUDGET_TASK`: aşılınca sorulur, doğrulama bütçeye sığdırmak için kısılmaz |
-| Önbellek dostu devir | Sabit satırlar başta, her açılışta değişenler sonda; dalga içinde aynı model; açılışlar birlikte |
-| Kontrol noktası | Adım sınırında `state.sh set step` + `notes.md`; `/clear` veya sıkıştırma sonrası kayıpsız devam |
-| Yeniden türetme | Plan karar günlüğündeki ve oturumda kesinleşmiş şeyler yeniden sorulmaz/yapılmaz |
-
-### Ölçüm: token defteri
-`USAGE_LOG=1` (`sdkit.env`) ile her ajan koşusu `<project-dir>/work/<slug>/usage.jsonl`'a bir JSON satırı yazar: rol, katman, host, model, giriş/çıkış ve önbellek token'ları. Claude'da `hooks/usage-log.sh` (SubagentStop ve Stop) transkriptten toplar; `run-role.sh` host CLI'ın kullanım bilgisini yazdığı yerde kaydeder (Claude evet; Cursor json çıktısında kullanım yok; diğerlerinde en iyi çaba). Kapalıyken hepsi sessiz no-op'tur.
-`scripts/usage.sh report [slug]` rol ve katman başına koşu sayısı ve token toplamlarını, ayrıca önbellek isabet oranını verir.
-
-### Ölçüm: olay günlüğü ve benchmark
-`TELEMETRY=1` (`sdkit.local.env`) ile faz geçişleri, kapı reddi, test sonucu, ajan koşuları (süre, token, araç çağrısı), yeniden deneme, hata ve doğrulama sonucu `work/<slug>/events.jsonl`'a yapılandırılmış olay olarak yazılır; yeni bir defter değildir, token sayıları `usage.sh` ile aynı kaynaktandır. Her ölçüm `actual`, `estimated` veya `unavailable` etiketi taşır; host vermediği sayı yazılmaz. İstem ve dosya içeriği kaydedilmez. `scripts/telemetry.sh summary [slug] [--json]` raporu verir; kapanıştan önce `telemetry.sh archive <slug>` çalıştırın (`work/<slug>` silinir). Fiyat tablosu (`pricing.json`) verilmedikçe maliyet gösterilmez. `bench/run.sh` dört temsilî iş akışını simüle (ücretsiz, deterministik) ya da `--real` ile gerçek host'larda koşturur. Ayrıntı: [design-telemetry.md](design-telemetry.md).
-
-Sözleşmeler (F02) aynı günlüğe `contract.check` olayı yazar (geçerli/geçersiz, kategori, sürüm, rol, kimlik, baytlar; metin yok). Ek yük simüle fikstürlerle ölçüldü (`bench/run.sh overhead`): devir başına 202 sabit bayt, cevap başına ~119 bayt, ajan başına 2 betik çağrısı, ek ajan çağrısı yok; **token tasarrufu veya maliyeti ölçülmedi**. Ayrıntı: [design-contracts.md](design-contracts.md) §7.
-
-### Bütçe ve subagent yönetimi
-Hepsi varsayılan olarak kapalıdır; kit sayı dayatmaz, her ekip kendi sınırını `sdkit.env`'e yazar.
-
-| Ayar | Ne yapar |
-|---|---|
-| `TOKEN_BUDGET_TASK` **(kişisel)** | `usage.sh budget` defterdeki `in + out + cache-write` toplamını sınırla kıyaslar. `TOKEN_BUDGET_WARN_PCT`'te (70) uyarır, %100'de durur. `USAGE_LOG=1` gerekir |
-| `MAX_SPAWNS` **(kişisel)** | `state.sh <slug> spawn` her açılışı sayar; sınır aşılınca bir sonraki açılış kullanıcıya sorulur. Token ölçümü gerekmez |
-| `SDD_MODE` | `strict` sınırı aşan açılıştan önce sorar, `guided` yalnızca uyarır, `off` ikisini de yok sayar |
-| `SUBAGENT_RESULT_MAX_LINES` **(kişisel)** | Uzun cevapta `result-size` hook'u uyarır (engellemez) |
-
-Claude Code'da sayımı `guard-budget` hook'u her `Agent` çağrısında yapar. Diğer host'larda açılış noktası `run-role.sh`'tır: sınırdayken çıkış 3 ile durur, kullanıcı onaylayınca `--ignore-budget` ile yeniden çalıştırılır. Host token bilgisi vermiyorsa defter boş kalır ve token bütçesi sessiz kalır; kit tahmin yürütmez. Aynı sebeple Codex'te token bütçesi yalnızca `run-role.sh` CLI çıktısından kayıt geldiğinde işler; `MAX_SPAWNS` her host'ta işler.
-
-Orchestrator için karar ve sonuç kuralları (`references/delegation.md`): bir iki dosyalık iş yerinde yapılır, roller rol açmaz, scout soruları toplu sorulur ve önce `lookup-cache.sh get` ile bakılır. Salt okunur roller dosya yazamaz; uzun cevabı orchestrator `run-role.sh --out` ile veya kendisi `work/<slug>/out/<rol>-<n>.md` altına yazar. Yazan roller (`engineer`, `developer`, `test-writer`, `devsecops`) uzun halini devir özetindeki `OUT:` yoluna koyar.
-
-Önbellek: model önbelleği aynı önek ve aynı model için çalışır, ömrü kısadır. Devir özetinde sabit satırlar (ROLE, RISK, PROJECT-DIR, standart READ) başta, değişenler (TASK, DIFF-BASE, TESTS) sonda durur; bir dalgada aynı katmanın görevleri aynı modeli kullanır; dalganın açılışları birlikte yapılır; görev ortasında `project.md` ve kurallar değiştirilmez.
-
-Ölçme yöntemi: sabit bir görevle **temel koşu** yap, `usage.sh report` çıktısını sakla, sonra **tek bir değişkeni** değiştir (bir rolün katmanı, `verifier-deep` yerine `verifier`, önbellek açık/kapalı, paralel/sıralı) ve aynı görevi tekrarla; raporları karşılaştır. Tahminle değil defterle karar ver.
-
-Sınır: kurallar tasarım düzeyindedir; defter yalnızca host'un token bilgisini verdiği yerde dolar (bölüm 13).
+Isolation **belongs to the kit**, it does not depend on the host's native worktree feature (so it works the same on every host): every writing task runs in its own worktree (`worktree.sh add T3`), its path is taken with `worktree.sh path T3` and written into the handoff as `WORKTREE:`, and the role reads/writes only under that path; if the host cannot pin the role to a directory, `run-role.sh --cwd` is used. The orchestrator merges wave by wave: `worktree.sh merge T3 tasks.md` first checks with `check-writes.sh` whether the task went outside its `writes:` set (if it did, it does not merge), then merges; after every merge it runs `verify --fast` and only then moves on to the next wave.
+At `high` risk reviewer and security-auditor run in parallel (plus host skills if `EXTRA_REVIEW_SKILLS` is set). A merge conflict means the write sets were wrong: stop, tell the user, fix the plan. At most `MAX_PARALLEL` (default 3) subagents at the same time: `plan-waves.sh` splits a larger wave, and tasks that do not fit move to the next wave.
 
 ---
 
-## 19. Proje belleği
+## 18. Token economy
 
-Hedef: ajanın her görevde yeniden keşfettiği, kodda görünmeyen bilgiyi tek yerde tutmak; ama her oturumda hepsini bağlama yüklememek. 1.0'dan itibaren yeni kurulumlarda **varsayılan açıktır** (`sdkit.env`'de `MEMORY=1`; `sdkit init --no-memory` ile kapanır). Eski bir repoda `sdkit upgrade` eksik ayarları varsayılanlarıyla ekler, yani belleği de açar; istemiyorsanız `MEMORY=` yapın.
+Goal: spend where judgement is needed; do not spend on searching, rewriting and rereading. The rules are in `core/rules/token-economy.md` (copied into the project); in summary:
 
-| Katman | Yer | Ömür |
+| Lever | How |
+|---|---|
+| Right-sized role | Search `scout` (light), planning check `analyst`, design and `high` verification (`verifier-deep`) strong, the rest standard. Roles declare a tier, not a model name |
+| Cheap first | `verify.sh` before the LLM review; if red, no expensive reading |
+| Do not repeat | Green verification cache: the Stop hook, the verifier and the PR step do not repeat work for the same tree (skipped with `--no-cache`) |
+| Script, not LLM | Plan parity (`check-plan-parity.sh`), verdict validation (`parse-verdict.sh`), write set (`check-writes.sh`), retry limit (`state.sh retry`) are deterministic scripts |
+| Artifact handoff | A sub-role gets a short handoff with paths (`handoff.md`), not the conversation. Independent roles already do not get the implementer's reasoning, which also keeps this context small |
+| Trim the output | The command's summary line + failing lines (`tail -40`); roles return a structured block + at most 15 lines |
+| Read narrowly | Grep for the symbol, open the lines you need; do not read the whole file unless you are changing most of it |
+| On-demand loading | `SKILL.md` is short; `references/` is read only at the relevant step |
+| Depth by risk | `low`: no engineer run, no independent verifier and no parallel wave; the analyst runs at `low` too (cheap, consistent). A single `scout` run via `NEEDS-LOOKUP` instead of role chains |
+| Parallel only when it pays | Disjoint write sets or read-only reviews, at most `MAX_PARALLEL` (3) concurrent |
+| One retry, then ask | A second automatic retry burns tokens and rarely helps |
+| Spawn when needed | One- or two-file work is done in place; roles do not spawn roles. Decision table: `references/delegation.md` |
+| Short result, long form in a file | A role returns at most 15 lines + a structured block; the long form goes under `work/<slug>/out/`. The same scout question is not paid for twice, thanks to `lookup-cache.sh` |
+| Budget | `MAX_SPAWNS`, `TOKEN_BUDGET_TASK`: asks when exceeded; verification is not cut short to fit the budget |
+| Cache-friendly handoff | Fixed lines first, lines that change on every spawn last; the same model within a wave; spawns together |
+| Checkpoint | `state.sh set step` + `notes.md` at step boundaries; resume without loss after `/clear` or compaction |
+| Re-deriving | Things already settled in the plan's decision log and in the session are not asked/done again |
+
+### Measurement: token ledger
+With `USAGE_LOG=1` (`sdkit.env`) every agent run writes one JSON line to `<project-dir>/work/<slug>/usage.jsonl`: role, tier, host, model, input/output and cache tokens. On Claude `hooks/usage-log.sh` (SubagentStop and Stop) collects them from the transcript; `run-role.sh` records them where the host CLI writes its usage info (Claude yes; Cursor has no usage in its json output; best effort on the others). When off, all of this is a silent no-op.
+`scripts/usage.sh report [slug]` gives the run counts and token totals per role and tier, plus the cache hit rate.
+
+### Measurement: event log and benchmark
+With `TELEMETRY=1` (`sdkit.local.env`) phase transitions, gate rejections, test results, agent runs (duration, tokens, tool calls), retries, failures and verification results are written as structured events to `work/<slug>/events.jsonl`; it is not a new ledger, the token counts come from the same source as `usage.sh`. Every measurement carries an `actual`, `estimated` or `unavailable` label; a number the host does not give is not written. Prompts and file contents are not recorded. `scripts/telemetry.sh summary [slug] [--json]` gives the report; run `telemetry.sh archive <slug>` before closeout (`work/<slug>` is deleted). No cost is shown unless a price table (`pricing.json`) is given. `bench/run.sh` runs four representative workflows simulated (free, deterministic) or, with `--real`, on real hosts. Details: [design-telemetry.md](design-telemetry.md).
+
+Contracts (F02) write a `contract.check` event to the same log (valid/invalid, category, version, role, id, bytes; no text). The overhead was measured with simulated fixtures (`bench/run.sh overhead`): 202 fixed bytes per handoff, ~119 bytes per answer, 2 script calls per agent, no extra agent call; **token savings or cost were not measured**. Details: [design-contracts.md](design-contracts.md) §7.
+
+### Budget and subagent management
+All are off by default; the kit imposes no numbers, each team writes its own limit in `sdkit.env`.
+
+| Setting | What it does |
+|---|---|
+| `TOKEN_BUDGET_TASK` **(personal)** | `usage.sh budget` compares the `in + out + cache-write` total in the ledger with the limit. Warns at `TOKEN_BUDGET_WARN_PCT` (70), stops at 100%. Needs `USAGE_LOG=1` |
+| `MAX_SPAWNS` **(personal)** | `state.sh <slug> spawn` counts every spawn; once the limit is exceeded, the next spawn is put to the user. No token measurement needed |
+| `SDD_MODE` | `strict` asks before the spawn that goes over the limit, `guided` only warns, `off` ignores both |
+| `SUBAGENT_RESULT_MAX_LINES` **(personal)** | The `result-size` hook warns on a long answer (does not block) |
+
+In Claude Code the counting is done by the `guard-budget` hook on every `Agent` call. On other hosts the spawn point is `run-role.sh`: at the limit it stops with exit 3, and after the user approves it is rerun with `--ignore-budget`. If the host gives no token info, the ledger stays empty and the token budget stays silent; the kit does not guess. For the same reason, on Codex the token budget works only when a record comes from the `run-role.sh` CLI output; `MAX_SPAWNS` works on every host.
+
+Decision and result rules for the orchestrator (`references/delegation.md`): one- or two-file work is done in place, roles do not spawn roles, scout questions are asked in batches and `lookup-cache.sh get` is checked first. Read-only roles cannot write files; the orchestrator writes their long answer with `run-role.sh --out` or itself under `work/<slug>/out/<role>-<n>.md`. Writing roles (`engineer`, `developer`, `test-writer`, `devsecops`) put their long form at the handoff's `OUT:` path.
+
+Cache: the model cache works for the same prefix and the same model, and its lifetime is short. In the handoff the fixed lines (ROLE, RISK, PROJECT-DIR, standard READ) come first and the changing ones (TASK, DIFF-BASE, TESTS) last; within a wave, tasks of the same tier use the same model; a wave's spawns are made together; `project.md` and the rules are not changed mid-task.
+
+How to measure: make a **baseline run** with a fixed task, keep the `usage.sh report` output, then change **a single variable** (a role's tier, `verifier` instead of `verifier-deep`, cache on/off, parallel/sequential) and repeat the same task; compare the reports. Decide by the ledger, not by guesses.
+
+Limit: the rules are at design level; the ledger fills only where the host gives token info (section 13).
+
+---
+
+## 19. Project memory
+
+Goal: keep the knowledge the agent rediscovers on every task, and that is not visible in the code, in one place; but without loading all of it into context in every session. Since 1.0 it is **on by default** in new installs (`MEMORY=1` in `sdkit.env`; turned off with `sdkit init --no-memory`). In an old repo `sdkit upgrade` adds missing settings with their defaults, so it turns memory on too; if you do not want it, set `MEMORY=`.
+
+| Layer | Where | Lifetime |
 |---|---|---|
-| Çalışma | Konuşma bağlamı | Bir oturum |
-| Görev | `work/<slug>/` (`state.json`, `plan.md`, `notes.md`, `out/`, `lookups/`) | Kapanışa kadar; `/clear` ve sıkıştırmadan sağ çıkar, kapanışta silinir; kişisel, git'e girmez |
-| Proje | `.sdkit/memory/` (`MEMORY_DIR`) | Kalıcı ve git'te; `memory.sh stale` eskiyenleri işaretler |
-| Kişisel | Host'un kendi belleği (Claude'un kullanıcı düzeyi otomatik belleği, `.claude/memory/`) | Host belirler; kit dokunmaz. `.claude/memory.md` gibi bir yol Claude Code tarafından zaten okunmaz, bu yüzden kit yönlendirme dosyası üretmez: ajan `CLAUDE.md`/`AGENTS.md` bloğu ve oturum hook'u üzerinden `.sdkit/memory/INDEX.md`'ye gider |
+| Working | Conversation context | One session |
+| Task | `work/<slug>/` (`state.json`, `plan.md`, `notes.md`, `out/`, `lookups/`) | Until closeout; survives `/clear` and compaction, deleted at closeout; personal, not in git |
+| Project | `.sdkit/memory/` (`MEMORY_DIR`) | Lasting and in git; `memory.sh stale` flags stale entries |
+| Personal | The host's own memory (Claude's user-level auto memory, `.claude/memory/`) | Decided by the host; the kit does not touch it. A path such as `.claude/memory.md` is not read by Claude Code anyway, so the kit generates no redirect file: the agent goes to `.sdkit/memory/INDEX.md` through the `CLAUDE.md`/`AGENTS.md` block and the session hook |
 
-**Proje belleği.** `memory/INDEX.md` her girdi için tek satır tutar; yalnızca bu dosya oturum başında bağlama girer (Claude'da `session-context` hook'u, diğer host'larda `AGENTS.md` bloğundaki "önce INDEX'i oku" yönlendirmesi). Girdi gövdesi, satırı ilgili görünce okunur. `INDEX.md` ayrıca `known-pitfalls.md` ve `adr/`'ye bağlanır; ikisi olduğu gibi kalır (verifier ve `incident-to-rule` bunlara bağlıdır). Girdi türleri: `fact` (koddan çıkmayan gerçek), `howto` (keşfedilmiş komut dizisi), `decision` (küçük karar; büyükleri ADR'ye).
+**Project memory.** `memory/INDEX.md` keeps one line per entry; only this file enters the context at session start (on Claude the `session-context` hook, on other hosts the "read the INDEX first" pointer in the `AGENTS.md` block). An entry's body is read when its line looks relevant. `INDEX.md` also links to `known-pitfalls.md` and `adr/`; both stay as they are (the verifier and `incident-to-rule` depend on them). Entry types: `fact` (a fact not derivable from the code), `howto` (a discovered command sequence), `decision` (a small decision; big ones go to an ADR).
 
-Girdi dosyası `<slug>.md`'dir ve başlığında `type`, `title`, `updated`, `verify-by`, `refs` alanları bulunur. Girdi, `updated` tarihinde yapılmış bir iddiadır: koda aykırıysa koda güvenilir ve kullanıcıya girdinin düzeltilmesi gerektiği söylenir.
+An entry file is `<slug>.md`, and its header has the fields `type`, `title`, `updated`, `verify-by`, `refs`. An entry is a claim made on its `updated` date: if it contradicts the code, trust the code and tell the user the entry needs fixing.
 
-**Yazma.** Görev sırasında ajan öğrendiklerini `work/<slug>/notes.md`'ye `MEMORY: fact|howto|decision | <slug> | <başlık> | <bir iki cümle>` satırları olarak ekler. Kapanışta (`MEMORY_PROMOTE=ask`) orchestrator `memory.sh candidates <slug>` listesini gösterir, kullanıcı seçer, `memory.sh promote <slug> <n...|all>` ekler. Kullanıcı onayı olmadan kalıcı belleğe yazılmaz (`auto` bunu bilinçli olarak kaldırır). Gizli bilgi gibi görünen metin reddedilir; `MEMORY_INDEX_MAX` dolunca yeni girdi eklenmez, önce `memory.sh stale` ile temizlenir.
+**Writing.** During a task the agent appends what it learned to `work/<slug>/notes.md` as `MEMORY: fact|howto|decision | <slug> | <title> | <one or two sentences>` lines. At closeout (`MEMORY_PROMOTE=ask`) the orchestrator shows the `memory.sh candidates <slug>` list, the user picks, and `memory.sh promote <slug> <n...|all>` adds them. Nothing is written to lasting memory without user approval (`auto` deliberately removes this). Text that looks like a secret is rejected; when `MEMORY_INDEX_MAX` is reached no new entry is added, clean up first with `memory.sh stale`.
 
-**Komutlar.** `memory.sh status|init|add|index|search|stale|autoload|candidates|promote` (bölüm 9'daki script ayrıntıları). `doctor` belleğin durumunu ve eskiyen girdileri raporlar. Ayrıntı ve orchestrator adımları: `skills/spec-driven-dev/references/memory.md`.
+**Commands.** `memory.sh status|init|add|index|search|stale|autoload|candidates|promote` (script details in section 9). `doctor` reports the memory's state and stale entries. Details and orchestrator steps: `skills/spec-driven-dev/references/memory.md`.
 
-**Git.** Bellek `.sdkit/` içinde olduğu için varsayılan olarak git'te ve ekipçe paylaşılır (`MEMORY_VCS=commit`). Kişisel istenirse `MEMORY_VCS=ignore` (`init --memory-vcs ignore` `.sdkit/.gitignore`'a satırı yazar) ya da `MEMORY_DIR`'i `.sdkit/` dışına verin. Sonradan değiştirmek serbesttir.
+**Git.** Since memory is inside `.sdkit/`, by default it is in git and shared by the team (`MEMORY_VCS=commit`). If you want it personal, `MEMORY_VCS=ignore` (`init --memory-vcs ignore` writes the line to `.sdkit/.gitignore`) or set `MEMORY_DIR` outside `.sdkit/`. Changing it later is fine.
 
-Sınır: Bellek bir güvenlik sınırı değildir; secret taraması basit bir kalıp denetimidir.
+Limit: memory is not a security boundary; the secret scan is a simple pattern check.
