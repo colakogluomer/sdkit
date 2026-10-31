@@ -43,7 +43,7 @@ workflow drives; `--install-openspec` installs its CLI if missing). Then:
 1. Fill in `.sdkit/project.md`: **the risk rubric is mandatory**, the workflow will not start without it.
 2. Enable the `verify.d/` policies you want (rename `*.example` to `*.sh`). `.sdkit/sdkit.env` holds the team's settings (release flow, protected paths, stack ...) and is committed; `.sdkit/sdkit.local.env` holds yours (limits, memory behaviour, hosts) and stays out of git. Every setting is already there with its default.
 3. `sdkit doctor` and fix every `FAIL`.
-4. Commit `.sdkit/` (its own `.gitignore` keeps `sdkit.local.env`, `work/` and generated files out), `AGENTS.md` and the kit block in `.claude/CLAUDE.md`. Add `--ci bitbucket` or `--ci github` to install the server-side gate too.
+4. Commit `.sdkit/` (its own `.gitignore` keeps `sdkit.local.env`, `work/` and generated files out), `AGENTS.md` and the kit block in `.claude/CLAUDE.md`. Add `--ci bitbucket`, `--ci github` or `--ci gitlab` to install the server-side gate too.
 
 **3. Join, every other developer** (each installs sdkit on their own machine; the host files are generated per machine and hidden from git in that clone)
 - **Claude Code:** `claude`, accept the plugin prompt once.
@@ -118,7 +118,7 @@ To adapt a role, write `.sdkit/roles.d/<role>.md`. `sdkit sync --check` and `sdk
   documented format but are not validated on live installs; the Claude Code path is.
 - **Stacks** (one per repo): `go`, `spring-boot`, `jvm`, `python`, `nextjs`, `react-native`, and a `generic` fallback where you supply the verify commands.
 - **Requirements.** `git`, `jq`, `node` (for OpenSpec), and your stack's toolchain. `sdkit doctor` lists what is missing.
-- **Pull requests.** Bitbucket is implemented. For GitHub and GitLab see [docs/hosts.md](docs/hosts.md).
+- **Pull requests.** `open-pr.sh` supports Bitbucket (REST API), GitHub (`gh`) and GitLab (`glab`); `PR_HOST=auto` picks one from the origin URL. See [docs/hosts.md](docs/hosts.md).
 
 ## The `sdkit` command
 

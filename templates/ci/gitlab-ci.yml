@@ -1,0 +1,18 @@
+# spec-driven-kit: server-side gate. Fails a merge request whose code change has no committed attestation for exactly that diff
+# (and, for medium/high risk, no independent verifier PASS). Local hooks can be skipped with --no-verify; this cannot.
+# Merge this job into your existing .gitlab-ci.yml if you have one. Keep your own build/test jobs next to it.
+# Make it required: Settings > Merge requests > "Pipelines must succeed".
+spec-driven-gate:
+  image:
+    name: alpine/git:latest
+    entrypoint: [""]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - apk add --no-cache bash jq coreutils
+    # merged-results pipelines check out a merge commit: the attestation is bound to the source branch's own content
+    - if [ -n "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-}" ]; then git checkout -q "$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA"; fi
+    - git fetch -q origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - VERIFY_BASE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" bash __KIT_DIR__/scripts/sdd.sh ci-check

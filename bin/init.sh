@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the kit's project side into a repo. Run once, by whoever sets a repo up; developers who clone it do nothing.
-# Usage: init.sh [--install-openspec] [--ci bitbucket|github] [--host claude[,codex,opencode,cursor,gemini]] [--dir NAME] [--mode plugin|copy] [--stack go|spring-boot|jvm|python|nextjs|react-native|generic] [--no-memory] [--memory-vcs commit|ignore] [--force] [--marketplace-url URL] [target-dir]
+# Usage: init.sh [--install-openspec] [--ci bitbucket|github|gitlab] [--host claude[,codex,opencode,cursor,gemini]] [--dir NAME] [--mode plugin|copy] [--stack go|spring-boot|jvm|python|nextjs|react-native|generic] [--no-memory] [--memory-vcs commit|ignore] [--force] [--marketplace-url URL] [target-dir]
 #   --host claude     (default) Claude Code
 #   The project-side directory (sdkit.env, project.md, rules, memory, scripts ...) is .sdkit/ for every host. It is committed except what
 #   is personal or generated (its .gitignore). A repo set up before 1.0 keeps its .claude/.codex/.agentkit with project.env until
@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 export FORCE MARKETPLACE_URL
-case "$CI_HOST" in ""|bitbucket|github) ;; *) say "--ci takes bitbucket or github, got '$CI_HOST'"; exit 2 ;; esac
+case "$CI_HOST" in ""|bitbucket|github|gitlab) ;; *) say "--ci takes bitbucket, github or gitlab, got '$CI_HOST'"; exit 2 ;; esac
 case "$MEMORY_VCS" in ""|commit|ignore) ;; *) say "--memory-vcs takes commit or ignore, got '$MEMORY_VCS'"; exit 2 ;; esac
 case "$MODE" in plugin|copy) ;; *) say "--mode must be plugin or copy"; exit 2 ;; esac
 for h in $(printf '%s' "$HOSTS" | tr ',' ' '); do
@@ -185,6 +185,7 @@ if [ -n "$CI_HOST" ]; then
   case "$CI_HOST" in
     bitbucket) install_template templates/ci/bitbucket-pipelines.yml bitbucket-pipelines.yml ;;
     github) install_template templates/ci/github-actions.yml .github/workflows/spec-driven-gate.yml ;;
+    gitlab) install_template templates/ci/gitlab-ci.yml .gitlab-ci.yml ;;
   esac
 fi
 

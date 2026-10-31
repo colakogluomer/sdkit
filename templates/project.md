@@ -8,7 +8,7 @@ this file holds the prose and rubrics. Fill in every section; `scaffold-doctor` 
 
 ## Branches and PRs
 - Integration branch: see `BASE_BRANCH` in `sdkit.env`. Branch naming and commit format: `rules/git.md`.
-- PR tooling (the agent opens the PR itself): TODO e.g. `open-pr.sh` for Bitbucket, `gh pr create` for GitHub.
+- PR tooling (the agent opens the PR itself): TODO e.g. `open-pr.sh` (Bitbucket, GitHub through `gh`, GitLab through `glab`; `PR_HOST` in sdkit.env).
 - Commit scopes: TODO list the short names used in `feat(<scope>): ...`.
 
 ## Release flow (optional)

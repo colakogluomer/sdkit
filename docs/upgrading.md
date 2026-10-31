@@ -61,7 +61,7 @@ From this version the kit writes only its own part of these files (a `spec-drive
 
 - Run `<kit>/bin/install.sh` once per machine so the git hooks find the kit in repos that carry no copy of the scripts.
 - `init.sh` now also copies `sdd.sh` and `resolve-base.sh` into `<project-dir>/scripts/` in every mode (CI runs them). `upgrade.sh` adds them and keeps them in sync.
-- Add the CI gate with `init.sh --ci bitbucket|github` (merge it into an existing pipeline file by hand), mark the check required, and protect `<project-dir>/attestations/` with code review.
+- Add the CI gate with `init.sh --ci bitbucket|github|gitlab` (merge it into an existing pipeline file by hand), mark the check required, and protect `<project-dir>/attestations/` with code review.
 - Tasks that finish `verified` now write `<project-dir>/attestations/<task>.json`; commit it with the change.
 - `sync.sh --check` fails on drift between the managed copies and the kit; `doctor.sh` reports drift, the CI gate and the machine registration.
 

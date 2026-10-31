@@ -168,7 +168,7 @@ if grep -qs "sdd.sh ci-check" "$TARGET/bitbucket-pipelines.yml" "$TARGET"/.githu
   ok "CI runs the spec-driven gate (sdd.sh ci-check)"
   [ -x "$TARGET/$KIT_DIR/scripts/sdd.sh" ] || bad "CI calls $KIT_DIR/scripts/sdd.sh but it is missing (run upgrade.sh)"
 else
-  warn "no server-side gate in CI: local hooks can be skipped with --no-verify (init.sh --ci bitbucket|github)"
+  warn "no server-side gate in CI: local hooks can be skipped with --no-verify (init.sh --ci bitbucket|github|gitlab)"
 fi
 
 # run-role.sh needs the host's CLI; the rest of the kit does not
