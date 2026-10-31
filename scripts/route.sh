@@ -9,10 +9,11 @@
 #                                     record how a decided run ended; prints the failure class and what the next request for this role will do
 #   route.sh classify [--rc N] [--prc N] [--stderr FILE] [--role R]   the failure class of an exit status (OK TRANSIENT RATE_LIMIT TIMEOUT INVALID_OUTPUT CONTRACT_FAILURE ...)
 #   route.sh registry [--json]         the model registry: derived from core/tiers.env + <project-dir>/models.json (project entries first)
-#   route.sh capabilities [host] [--json]   the execution contract per adapter (core/adapters.json)
+#   route.sh capabilities [host] [--json|--probe]   the execution contract per adapter (core/adapters.json); --probe re-checks the flags against the installed CLIs' --help (no model call)
 #   route.sh validate                  check the ROUTE_* settings, models.json and the preferences; exit 2 and list the problems
 #   route.sh log [slug]                the routing ledger of a task, one line per decision/outcome
-# decide exit: 0 run it (action execute|retry|escalate) | 7 not run (reuse, optional skipped, duplicate, a standing BLOCK, retries/escalation exhausted)
+# decide exit: 0 run it (action execute|retry|escalate) | 7 reuse: valid evidence already exists (success-like: nothing to run or retry)
+#              | 8 stop, nothing run and nothing valid exists (optional skipped, duplicate, a standing BLOCK, retries/escalation exhausted): never success
 #              | 3 budget exhausted | 2 refused by policy or configuration (nothing is run; the reason says which setting)
 # Policy version: route-v1. A decision never lowers a risk floor, skips a mandatory gate, or turns a BLOCK into a PASS.
 set -u
@@ -83,8 +84,8 @@ registry_build() {  # JSON array: <project-dir>/models.json entries first, then 
     | map(. + {provider: (.provider // $a[0][.adapter].provider // null), context: (.context // null), cost: (.cost // $pr[.model // ""] // null),
                usage_accounting: ($a[0][.adapter].caps.usage_reporting // "none")})'
 }
-registry_errors() {  # problems in the registry (project entries are the only user input)
-  local reg; reg="$(registry_build 2>&1)" || { echo "$reg"; return; }
+registry_errors() {  # problems in the registry (project entries are the only user input); $1 = an already built registry
+  local reg="${1:-}"; [ -n "$reg" ] || reg="$(registry_build 2>&1)" || { echo "$reg"; return; }
   jq -r --slurpfile a "$ADAPTERS" '
     (map(select(.source == "models.json"))) as $p
     | ($p | map(.id) | group_by(.) | map(select(length > 1) | "models.json: duplicate id \(.[0])")[]),
@@ -102,7 +103,7 @@ slug_now() { local s; s="$(sdkit_active_slug "$top")"; echo "${s:-_misc}"; }
 ledger_of() { echo "$work/$1/routing.jsonl"; }
 tele() { [ "${TELEMETRY:-}" = 1 ] && [ -x "$here/telemetry.sh" ] && { "$here/telemetry.sh" emit "$@" ${slug:+--task "$slug"} >/dev/null 2>&1 || true; }; return 0; }
 
-classify_text() {  # classify_text <rc> <prc> <stderr file> -> class
+classify_text() {  # (exit 7/8 of run-role/decide are routing outcomes, not host failures)  # classify_text <rc> <prc> <stderr file> -> class
   local rc="$1" prc="$2" f="$3" t=""
   [ -f "$f" ] && t="$(tail -40 "$f" 2>/dev/null | tr 'A-Z' 'a-z')"
   case "$rc" in
@@ -128,11 +129,35 @@ case "$cmd" in
     exit 0 ;;
   capabilities)
     [ -n "$ADAPTERS" ] || { echo "adapters.json is missing" >&2; exit 2; }
-    h=""; js=0; for a in "$@"; do case "$a" in --json) js=1 ;; *) h="$a" ;; esac; done
+    h=""; js=0; probe=0; for a in "$@"; do case "$a" in --json) js=1 ;; --probe) probe=1 ;; *) h="$a" ;; esac; done
     sel='.'; [ -n "$h" ] && sel="{\"$h\": .[\"$h\"]}"
-    [ "$js" = 1 ] && { jq "del(._doc) | $sel" "$ADAPTERS"; exit 0; }
-    jq -r "del(._doc) | $sel | to_entries[] | select(.value != null) | \"\(.key)\t\" + (.value.caps | to_entries | map(\"\(.key)=\(.value)\") | join(\" \"))" "$ADAPTERS" | column -t -s "$(printf '\t')"
-    echo "(declared = per the host's documented headless mode, not verified live; kit = provided by the kit; none = unsupported)"
+    strip='with_entries(select(.key | startswith("_") | not))'
+    if [ "$probe" = 1 ]; then
+      # Reads only `<cli> --help` (and --version) of the CLIs installed here: never a model call. A capability is help-verified when every flag it needs is in that
+      # help text; a flag that is missing is reported by name; a CLI that is not installed leaves its capabilities as declared. The behaviour is not exercised.
+      for hh in $(jq -r "$strip | keys_unsorted[]" "$ADAPTERS"); do
+        [ -z "$h" ] || [ "$h" = "$hh" ] || continue
+        cli="$(jq -r --arg h "$hh" '.[$h].cli' "$ADAPTERS")"
+        if ! command -v "$cli" >/dev/null 2>&1; then echo "$hh: $cli not installed here: every capability stays as declared in adapters.json (unverified)"; continue; fi
+        ver="$("$cli" --version 2>&1 | head -1)"
+        helparg="$(jq -r --arg h "$hh" '.[$h].probe.help | join(" ")' "$ADAPTERS")"
+        # shellcheck disable=SC2086
+        htxt="$(${tmo:-} "$cli" $helparg --help 2>&1)"
+        res=""
+        while IFS=$'\t' read -r cap flags; do
+          st=help-verified
+          for f in $flags; do
+            printf '%s\n' "$htxt" | grep -E -q -- "(^|[[:space:],\[])$f([[:space:],=<\[]|$)" || { st="MISSING:$f"; break; }
+          done
+          res="$res $cap=$st"
+        done < <(jq -r --arg h "$hh" '.[$h].caps as $c | .[$h].probe.flags | to_entries[] | select($c[.key] != "none") | [.key, (.value | join(" "))] | @tsv' "$ADAPTERS")
+        echo "$hh ($ver):$res"
+      done
+      exit 0
+    fi
+    [ "$js" = 1 ] && { jq "$strip | $sel" "$ADAPTERS"; exit 0; }
+    jq -r "$strip | $sel | to_entries[] | select(.value != null) | \"\(.key)\t\" + (.value.caps | to_entries | map(\"\(.key)=\(.value)\") | join(\" \"))" "$ADAPTERS" | column -t -s "$(printf '\t')"
+    echo "(help-verified = flags present in the local --help, behaviour not exercised; declared = documented headless mode, never checked here; estimated = host's own client-side estimate, not billing; kit = provided by the kit; none = unsupported; see --probe)"
     exit 0 ;;
   validate)
     errs="$( { cfg_errors; registry_errors
@@ -160,9 +185,9 @@ esac
 # ---------------------------------------------------------------- outcome: close a decided run
 slug="$(slug_now)"; ledger="$(ledger_of "$slug")"
 if [ "$cmd" = outcome ]; then
-  did=""; rc=""; prc=""; err=""; dur=""; tin=""; tout=""; tq=unavailable
+  did=""; rc=""; prc=""; err=""; dur=""; tin=""; tout=""; tq=unavailable; cest=""
   while [ $# -gt 0 ]; do case "$1" in --decision) did="$2"; shift ;; --rc) rc="$2"; shift ;; --prc) prc="$2"; shift ;; --stderr) err="$2"; shift ;;
-    --dur-ms) dur="$2"; shift ;; --in) tin="$2"; shift ;; --out) tout="$2"; shift ;; --tokens) tq="$2"; shift ;; *) echo "unknown option $1" >&2; exit 2 ;; esac; shift; done
+    --dur-ms) dur="$2"; shift ;; --cost-est) cest="$2"; shift ;; --in) tin="$2"; shift ;; --out) tout="$2"; shift ;; --tokens) tq="$2"; shift ;; *) echo "unknown option $1" >&2; exit 2 ;; esac; shift; done
   [ -n "$did" ] && isint "$rc" || { echo "outcome needs --decision ID and --rc N" >&2; exit 2; }
   [ -f "$ledger" ] || { echo "no routing ledger for $slug" >&2; exit 2; }
   dec="$(jq -c --arg id "$did" 'select(.type == "decision" and .id == $id)' "$ledger" | tail -1)"
@@ -170,8 +195,9 @@ if [ "$cmd" = outcome ]; then
   cls="$(classify_text "$rc" "$prc" "$err")"
   if [ "$cls" = VERDICT_BLOCK ]; then [ "$(jq -r .role <<< "$dec")" = security-auditor ] && cls=SECURITY_BLOCK || cls=VERIFICATION_FAILURE; fi
   tj=null; [ "$tq" = actual ] && isint "$tin" && isint "$tout" && tj="$(jq -nc --argjson i "$tin" --argjson o "$tout" '{in:$i,out:$o}')"
-  line="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$did" --arg cls "$cls" --argjson rc "$rc" --argjson d "$dec" --arg dur "$dur" --argjson tok "$tj" --arg tq "$tq" \
-    '{v:1, type:"outcome", ts:$ts, id:$id, key:$d.key, role:$d.role, class:$cls, rc:$rc, dur_ms:(if $dur == "" then null else ($dur | tonumber) end), tokens:$tok, tokens_quality:(if $tok == null then "unavailable" else "actual" end)}')"
+  line="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$did" --arg cls "$cls" --argjson rc "$rc" --argjson d "$dec" --arg dur "$dur" --argjson tok "$tj" --arg tq "$tq" --arg cest "$cest" \
+    '{v:1, type:"outcome", ts:$ts, id:$id, key:$d.key, role:$d.role, class:$cls, rc:$rc, dur_ms:(if $dur == "" then null else ($dur | tonumber) end), tokens:$tok, tokens_quality:(if $tok == null then "unavailable" else "actual" end)}
+     + (if ($cest | test("^[0-9]+([.][0-9]+)?$")) then {host_cost_estimate_usd:($cest | tonumber), cost_provenance:"host client-side estimate (not billed)"} else {} end)')"
   sdkit_lock "$ledger"; printf '%s\n' "$line" >> "$ledger"; sdkit_unlock "$ledger"
   tele workflow.decision --source routing --outcome "outcome:$cls" --role "$(jq -r .role <<< "$dec")" --note "$did rc=$rc"
   echo "$cls"; exit 0
@@ -197,14 +223,15 @@ emit() {  # print the decision and leave with the exit status its action implies
   case "$D_ACTION" in execute|retry|escalate) rcx=0 ;; reuse) rcx=7 ;; stop)
     case "$D_REASON" in BUDGET_EXHAUSTED) rcx=3 ;;
       CONFIG_INVALID|UNKNOWN_ROLE|NO_ADAPTER|ADAPTER_UNSUPPORTED|NO_COMPATIBLE_MODEL|OVERRIDE_INVALID|OVERRIDE_BELOW_FLOOR|PREFERENCE_INVALID|PREFERENCE_BELOW_FLOOR|FIXED_INVALID|FIXED_BELOW_FLOOR|NO_ESCALATION_TARGET) rcx=2 ;;
-      *) rcx=7 ;; esac ;;
+      *) rcx=8 ;; esac ;;
   esac
-  notes="$(printf '%s\n' ${D_NOTES[@]+"${D_NOTES[@]}"} | sed '/^$/d' | jq -R . | jq -sc .)"; warns="$(printf '%s\n' ${D_WARN[@]+"${D_WARN[@]}"} | sed '/^$/d' | jq -R . | jq -sc .)"
+  notes="$(printf '%s\n' ${D_NOTES[@]+"${D_NOTES[@]}"})"; warns="$(printf '%s\n' ${D_WARN[@]+"${D_WARN[@]}"})"   # newline lists; split inside the one jq below
   local j
   j="$(jq -nc --arg id "$D_ID" --arg task "$slug" --arg role "$role" --arg action "$D_ACTION" --arg adapter "$D_ADAPTER" --arg model "$D_MODEL" --arg effort "$D_EFFORT" --arg tier "$D_TIER" \
     --argjson enforced "$D_ENFORCED" --argjson attempt "$D_ATTEMPT" --arg reason "$D_REASON" --arg pol "$POLICY" --arg mand "$D_MAND" --arg cls "$D_CLASS" --arg risk "$risk" \
-    --arg profile "$profile" --argjson wait "$D_WAIT" --argjson prev "$D_PREV" --argjson notes "$notes" --argjson warns "$warns" --argjson budget "$D_BUDGET" --arg routing "$ROUTING" --arg timeout "$D_TIMEOUT" --arg rsrc "$D_RISKSRC" \
-    '{decision_id:$id, task:$task, role:$role, role_class:$cls, mandatory:($mand == "true"), risk:(if $risk == "" then null else $risk end), risk_source:$rsrc, profile:$profile,
+    --arg profile "$profile" --argjson wait "$D_WAIT" --argjson prev "$D_PREV" --arg notes "$notes" --arg warns "$warns" --argjson budget "$D_BUDGET" --arg routing "$ROUTING" --arg timeout "$D_TIMEOUT" --arg rsrc "$D_RISKSRC" \
+    '($notes | split("\n") | map(select(. != ""))) as $notes | ($warns | split("\n") | map(select(. != ""))) as $warns
+    | {decision_id:$id, task:$task, role:$role, role_class:$cls, mandatory:($mand == "true"), risk:(if $risk == "" then null else $risk end), risk_source:$rsrc, profile:$profile,
       action:$action, adapter:(if $adapter == "" then null else $adapter end), model:(if $model == "" then null else $model end), effort:(if $effort == "" then null else $effort end),
       tier:(if $tier == "" then null else $tier end), tier_enforced:$enforced, timeout_s:(if $timeout == "" then null else ($timeout | tonumber) end),
       budget:$budget, attempt:$attempt, wait_s:$wait, reason:$reason, policy_version:$pol, routing:$routing}
@@ -231,7 +258,8 @@ if [ "$reserve" = 1 ]; then   # one decision at a time per task: the in-flight c
   sdkit_lock "$ledger"; trap 'sdkit_unlock "$ledger"' EXIT
 fi
 cerr="$(cfg_errors | head -3 | paste -sd';' -)"; [ -z "$cerr" ] || stop CONFIG_INVALID "$cerr"
-rerr="$(registry_errors | head -3 | paste -sd';' -)"; [ -z "$rerr" ] || stop CONFIG_INVALID "$rerr"
+REG="$(registry_build 2>&1)" || stop CONFIG_INVALID "$REG"   # built once per decision
+rerr="$(registry_errors "$REG" | head -3 | paste -sd';' -)"; [ -z "$rerr" ] || stop CONFIG_INVALID "$rerr"
 
 # --- role
 base="${role%-deep}"; rsrc="$(role_src "$role")" || stop UNKNOWN_ROLE "no role text for '$base'"
@@ -254,13 +282,17 @@ eff_risk="${risk:-medium}"
 # --- key of this request: what makes two requests "the same" (role + handoff + the diff, for roles whose evidence is bound to it)
 hsum="-"; [ -n "$handoff" ] && [ -f "$handoff" ] && hsum="$(shasum -a 256 "$handoff" | cut -c1-16)"
 fp=""
-if [ "$D_CLASS" = gate ] && [ -f "$sdd_state" ]; then fp="$(CLAUDE_PROJECT_DIR="$top" "$here/sdd.sh" fingerprint 2>/dev/null | cut -c1-16)"; fi
+evj=""   # one sdd.sh call gives both the diff fingerprint and every role's evidence state (the diff is hashed once, not twice)
+if [ "$D_CLASS" = gate ] && [ -f "$sdd_state" ]; then
+  evj="$(CLAUDE_PROJECT_DIR="$top" "$here/sdd.sh" evidence --json --with-fingerprint 2>/dev/null)"
+  fp="$(jq -r '.fingerprint // empty' <<< "$evj" 2>/dev/null | cut -c1-16)"
+fi
 KEY="$base|$hsum|${fp:--}"
 
 # --- evidence: reuse what sdd.sh calls valid (it is the one judge of validity: trusted run, this task, this diff, no shared run), never re-judge a BLOCK
 #     that stands for this diff, otherwise (missing / stale / untrusted / conflict) run the role
 if [ "$D_CLASS" = gate ] && [ -f "$sdd_state" ] && [ -n "$fp" ]; then
-  evs="$(CLAUDE_PROJECT_DIR="$top" "$here/sdd.sh" evidence --json 2>/dev/null | jq -r --arg r "$base" '.[] | select(.role == $r) | [.state, .verdict, .run] | @tsv')"
+  evs="$(jq -r --arg r "$base" '.roles[] | select(.role == $r) | [.state, .verdict, .run] | @tsv' <<< "$evj")"
   ev_state="${evs%%$'\t'*}"; ev_run="${evs##*$'\t'}"
   ev_bfp="$(jq -r --arg r "$base" '.evidence[$r] | select(.result == "BLOCK") | .fingerprint // empty' "$sdd_state" 2>/dev/null | cut -c1-16)"
   if [ -n "$ev_bfp" ] && [ "$ev_bfp" = "$fp" ]; then
@@ -353,7 +385,7 @@ fi
 primary="$host"
 [ -n "$primary" ] || { [ "$D_CLASS" = gate ] && primary="${VERIFIER_HOST:-}"; }
 [ -n "$primary" ] || primary="${RUN_ROLE_HOST:-}"
-reg="$(registry_build)"
+reg="$REG"
 pref="$(eval "printf '%s' \"\${ROUTE_PREFER_$(upper "$base"):-}\"")"
 prefe=""; fixede=""
 if [ -n "$pref" ] && [ -z "$model" ]; then
@@ -378,10 +410,10 @@ pick=""; first=""; lastwhy=NO_COMPATIBLE_MODEL; lastnote=""; n_try=0
 for a in $cands; do
   n_try=$((n_try + 1)); [ -n "$first" ] || first="$a"
   case " $failed_adapters " in *" $a "*) continue ;; esac
-  jq -e --arg a "$a" 'has($a)' "$ADAPTERS" >/dev/null 2>&1 || { lastwhy=ADAPTER_UNSUPPORTED; lastnote="unknown adapter '$a'"; continue; }
-  caps_ok="$(jq -r --arg a "$a" '.[$a].caps | (.noninteractive != "none" and .tool_use != "none")' "$ADAPTERS")"
+  IFS=$'\x1f' read -r a_known caps_ok a_cli < <(jq -r --arg a "$a" 'if has($a) then ["yes", (.[$a].caps | (.noninteractive != "none" and .tool_use != "none") | tostring), .[$a].cli] else ["no", "", ""] end | join("\u001f")' "$ADAPTERS")
+  [ "$a_known" = yes ] || { lastwhy=ADAPTER_UNSUPPORTED; lastnote="unknown adapter '$a'"; continue; }
   [ "$caps_ok" = true ] || { lastwhy=ADAPTER_UNSUPPORTED; lastnote="adapter $a cannot run noninteractively with tools"; continue; }
-  if [ "$reqcli" = 1 ]; then c="$(jq -r --arg a "$a" '.[$a].cli' "$ADAPTERS")"; command -v "$c" >/dev/null 2>&1 || { lastwhy=ADAPTER_UNSUPPORTED; lastnote="CLI '$c' (adapter $a) is not installed"; failed_adapters="$failed_adapters $a"; continue; }; fi
+  if [ "$reqcli" = 1 ]; then c="$a_cli"; command -v "$c" >/dev/null 2>&1 || { lastwhy=ADAPTER_UNSUPPORTED; lastnote="CLI '$c' (adapter $a) is not installed"; failed_adapters="$failed_adapters $a"; continue; }; fi
   # eligible: this adapter, available, handles the role, and (unless it is the host default) at least the needed tier
   elig="$(jq -c --arg a "$a" --arg r "$base" --argjson need "$(rank "$needed")" '
     def rk: {"light":1,"standard":2,"strong":3}[.] // 0;
@@ -411,20 +443,19 @@ if [ -z "$pick" ]; then
   [ "$mode" = escalate ] && stop NO_ESCALATION_TARGET "$lastnote"
   stop "$lastwhy" "$lastnote"
 fi
-D_ADAPTER="$(jq -r .adapter <<< "$pick")"
-D_MODEL="$(jq -r '.model // ""' <<< "$pick")"; D_EFFORT="$(jq -r '.effort // ""' <<< "$pick")"
-D_TIER="$needed"; [ "$(jq -r .tier <<< "$pick")" = "*" ] && { D_ENFORCED=false; D_WARN+=("MODEL_INHERITED: adapter $D_ADAPTER has no configured model for tier $needed, so the host's default model runs; its capability tier is not verified"); }
+# one jq for everything read from the pick and its adapter (each jq is a process: ~25 ms on this machine)
+IFS=$'\x1f' read -r D_ADAPTER D_MODEL D_EFFORT pick_tier D_CLI model_sel adapt_usage < <(jq -r --slurpfile a "$ADAPTERS" '[.adapter, (.model // ""), (.effort // ""), .tier, $a[0][.adapter].cli, $a[0][.adapter].caps.model_selection, $a[0][.adapter].caps.usage_reporting] | join("\u001f")' <<< "$pick")
+D_TIER="$needed"; [ "$pick_tier" = "*" ] && { D_ENFORCED=false; D_WARN+=("MODEL_INHERITED: adapter $D_ADAPTER has no configured model for tier $needed, so the host's default model runs; its capability tier is not verified"); }
 # a model needs model selection support (every shipped adapter declares it; a project may state otherwise)
-if [ -n "$D_MODEL" ] && [ "$(jq -r --arg a "$D_ADAPTER" '.[$a].caps.model_selection' "$ADAPTERS")" = none ]; then stop ADAPTER_UNSUPPORTED "adapter $D_ADAPTER cannot select a model, so $D_MODEL cannot be honoured"; fi
+if [ -n "$D_MODEL" ] && [ "$model_sel" = none ]; then stop ADAPTER_UNSUPPORTED "adapter $D_ADAPTER cannot select a model, so $D_MODEL cannot be honoured"; fi
 [ "$D_REASON" = ROLE_CAPABILITY_MATCH ] && [ -n "$why_tier" ] && D_REASON="$why_tier"
 [ "$mode" = escalate ] && D_REASON="ESCALATE_${l_class}"
 [ "$mode" = fallback ] && { D_REASON=ADAPTER_FALLBACK; D_NOTES+=("adapter(s) failed with HOST_MISSING: ${failed_adapters# }"); }
 if [ "$mode" = fresh ] && [ "$D_ADAPTER" != "$first" ] && [ -z "$host" ]; then D_REASON=ADAPTER_FALLBACK; D_NOTES+=("$first could not run this role: $lastnote"); fi
-D_CLI="$(jq -r --arg a "$D_ADAPTER" '.[$a].cli' "$ADAPTERS")"
 
 # --- budget. Hard = checked at the spawn boundary, so no further run starts; the run itself is only as bounded as the host allows.
 mode_sdd="${SDD_MODE:-strict}"
-used_n=0; used_un=0; used_tok=0; roleused=0; est=null; est_complete=true
+used_n=0; used_un=0; used_tok=0; roleused=0; est=null; est_complete=true; hc=null; hcn=0
 uf="$work/$slug/usage.jsonl"
 if [ -f "$uf" ]; then
   ub="$(jq -sc --arg r "$base" --argjson p "$(jq -c '[.]' <<< "$(prices_json)")" '
@@ -432,11 +463,11 @@ if [ -f "$uf" ]; then
     {n: length, un: (map(select(tq == "unavailable")) | length),
      tok: (map(select(tq != "unavailable") | (.in + .out + .cache_write)) | add // 0),
      role: (map(select((.role | sub("-deep$"; "")) == $r and tq != "unavailable") | (.in + .out + .cache_write)) | add // 0),
+     hc: (map(.cost_est_usd // empty) | if length == 0 then null else add end), hcn: (map(select(.cost_est_usd != null)) | length),
      priced: (map(select(tq != "unavailable" and ($p[0][.model] != null)))), unpriced: (map(select(tq == "unavailable" or ($p[0][.model] == null))) | length)}
     | . + {est: (if (.priced | length) == 0 then null else (.priced | map(. as $l | $p[0][$l.model] as $pr | (($l.in * ($pr.in // 0)) + ($l.out * ($pr.out // 0)) + ($l.cache_read * ($pr.cache_read // 0)) + ($l.cache_write * ($pr.cache_write // 0))) / 1000000) | add) end)}' "$uf" 2>/dev/null)"
-  if [ -n "$ub" ]; then used_n="$(jq .n <<< "$ub")"; used_un="$(jq .un <<< "$ub")"; used_tok="$(jq .tok <<< "$ub")"; roleused="$(jq .role <<< "$ub")"; est="$(jq .est <<< "$ub")"; [ "$(jq .unpriced <<< "$ub")" = 0 ] || est_complete=false; fi
+  if [ -n "$ub" ]; then used_n="$(jq .n <<< "$ub")"; used_un="$(jq .un <<< "$ub")"; used_tok="$(jq .tok <<< "$ub")"; roleused="$(jq .role <<< "$ub")"; est="$(jq .est <<< "$ub")"; hc="$(jq .hc <<< "$ub")"; hcn="$(jq .hcn <<< "$ub")"; [ "$(jq .unpriced <<< "$ub")" = 0 ] || est_complete=false; fi
 fi
-adapt_usage="$(jq -r --arg a "$D_ADAPTER" '.[$a].caps.usage_reporting' "$ADAPTERS")"
 acct=complete; [ "$used_un" -gt 0 ] && acct=partial; [ "$used_n" -gt 0 ] && [ "$used_un" = "$used_n" ] && acct=unavailable
 tok_enf=hard; { [ "$acct" != complete ] || [ "$adapt_usage" = none ]; } && tok_enf=advisory
 [ "$adapt_usage" = none ] && [ -n "${TOKEN_BUDGET_TASK:-}${ROUTE_ROLE_TOKENS:-}" ] && D_WARN+=("USAGE_UNAVAILABLE: adapter $D_ADAPTER reports no token usage, so token budgets are advisory (runs on it are not counted)")
@@ -467,9 +498,10 @@ if isint "${ROUTE_TIMEOUT_S:-}" && [ "${ROUTE_TIMEOUT_S:-0}" != 0 ]; then
 fi
 if [ -n "${ROUTE_BUDGET_COST:-}" ]; then
   # money: estimated from the token ledger and the user's pricing table only; no adapter reports an actual cost, so this limit is advisory
-  bj="$(jq -c --argjson l "$ROUTE_BUDGET_COST" --argjson e "$est" --argjson c "$est_complete" '. + {cost:{limit_usd:$l, estimated_usd:$e, actual_usd:null, estimate_complete:$c, enforcement:"advisory"}}' <<< "$bj")"
-  if [ "$est" = null ]; then D_WARN+=("COST_UNMEASURABLE: no priced usage yet (needs token usage and $KIT_DIR/pricing.json); ROUTE_BUDGET_COST is not evaluated")
-  elif awk -v e="$est" -v l="$ROUTE_BUDGET_COST" 'BEGIN{exit !(e >= l)}'; then D_WARN+=("COST_ESTIMATE_OVER_BUDGET: estimated \$$est of \$$ROUTE_BUDGET_COST (advisory; not a stop)"); fi
+  bj="$(jq -c --argjson l "$ROUTE_BUDGET_COST" --argjson e "$est" --argjson c "$est_complete" --argjson hc "$hc" --argjson hn "$hcn" '. + {cost:{limit_usd:$l, estimated_usd:$e, actual_usd:null, estimate_complete:$c, host_reported_estimate_usd:$hc, host_reported_runs:$hn, host_reported_provenance:"the host'"'"'s own client-side estimate, not a billed amount", enforcement:"advisory"}}' <<< "$bj")"
+  if [ "$hc" != null ] && awk -v e="$hc" -v l="$ROUTE_BUDGET_COST" 'BEGIN{exit !(e >= l)}'; then D_WARN+=("COST_HOST_ESTIMATE_OVER_BUDGET: the host reports an estimated \$$hc of \$$ROUTE_BUDGET_COST (its own client-side estimate, not a bill; advisory, not a stop)"); fi
+  if [ "$est" = null ] && [ "$hc" = null ]; then D_WARN+=("COST_UNMEASURABLE: no priced usage yet (needs token usage and $KIT_DIR/pricing.json); ROUTE_BUDGET_COST is not evaluated")
+  elif [ "$est" != null ] && awk -v e="$est" -v l="$ROUTE_BUDGET_COST" 'BEGIN{exit !(e >= l)}'; then D_WARN+=("COST_ESTIMATE_OVER_BUDGET: estimated \$$est of \$$ROUTE_BUDGET_COST (advisory; not a stop)"); fi
 fi
 D_BUDGET="$(jq -c --arg a "$acct" '. + {accounting:$a}' <<< "$bj")"
 

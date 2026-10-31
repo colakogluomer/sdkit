@@ -546,8 +546,8 @@ Scout cevaplarını görev boyunca saklar (`work/<slug>/lookups/`). Cevap yalnı
 
 ### `scripts/route.sh decide|explain|outcome|classify|registry|capabilities|validate|log`
 Orkestrasyon kararları (F06, [design-routing.md](design-routing.md)): hangi adaptör ve model, hangi bütçeyle, çalıştır / yeniden kullan / yeniden dene / yükselt / dur. Saf kabuk+jq, model çağrısı yok; her karar bir neden kodu taşır.
-`ROUTING=on` iken `run-role.sh` bu kararı **tüketir** (karar `execute|retry|escalate` değilse hiçbir şey başlatmaz: çıkış 3 bütçe, 2 politika reddi, 7 yönlendirme çalıştırmamaya karar verdi; `--rerun <neden>` bilinçli tekrar için).
-`ROUTING=off` (varsayılan) iken `run-role.sh` eskisi gibi çalışır. `route.sh explain --role R` beş satırda kararı gösterir ve hiçbir şey kaydetmez. Kapı rolleri (verifier, reviewer, security-auditor) risk tabanını, zorunluluğu ve kanıt kurallarını asla aşmaz; duran bir BLOCK aynı diff'te başka sağlayıcıyla yeniden yargılanmaz.
+`ROUTING=on` iken `run-role.sh` bu kararı **tüketir** (karar `execute|retry|escalate` değilse hiçbir şey başlatmaz: çıkış 3 bütçe, 2 politika reddi, **7 geçerli kanıt yeniden kullanıldı (başarı benzeri, yeniden deneme yok)**, **8 çalıştırılmadı ve geçerli sonuç yok (asla başarı değil)**; `--rerun <neden>` bilinçli tekrar için).
+`ROUTING=off` (varsayılan) iken `run-role.sh` eskisi gibi çalışır. `route.sh explain --role R` beş satırda kararı gösterir ve hiçbir şey kaydetmez. `route.sh capabilities --probe` kurulu CLI'ların `--help` çıktısıyla yetenek bayraklarını denetler (model çağrısı yok). Kapı rolleri (verifier, reviewer, security-auditor) risk tabanını, zorunluluğu ve kanıt kurallarını asla aşmaz; duran bir BLOCK aynı diff'te başka sağlayıcıyla yeniden yargılanmaz.
 
 ### `scripts/verify-core.sh`
 Doğrudan çalıştırılmaz; stack'in `verify.sh`'ı yükler (bölüm 8). `verify-lib.sh` `verify.d` yardımcısıdır (tüm stack'lerde ortak).

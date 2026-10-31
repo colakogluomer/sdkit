@@ -329,7 +329,7 @@ cmd__verdict() { need_state; local r="${1:-}"; shift || true; cmd__evidence veri
 #   valid | missing | block | wrong-task | untrusted | stale | conflict (the same run id under two roles). live = against the diff as it is now;
 #   recorded = against the fingerprint verified (the diff no longer exists after the merge, so `done` cannot recompute it).
 ev_table() {
-  local ref; if [ "$1" = live ]; then ref="$(fingerprint)"; else ref="$(get .verifiedFingerprint)"; fi; shift
+  local ref; if [ "$1" = live ]; then ref="${EV_REF:-$(fingerprint)}"; else ref="$(get .verifiedFingerprint)"; fi; shift   # EV_REF: a fingerprint the caller already computed
   jq -r --arg ref "$ref" --arg roles "$*" '
     . as $s | ($roles | split(" ") | map(select(. != ""))) as $rs
     | $rs[] as $r | ($s.evidence[$r] // null) as $e
@@ -371,8 +371,11 @@ evidence_gate() {
 cmd_evidence() {  # read-only view: every role, its validity state against the diff as it is now
   need_state
   local req rows; req="$(ev_roles_required | tr '\n' ' ')"
+  if [ "${2:-}" = --with-fingerprint ]; then EV_REF="$(fingerprint)"; fi   # route.sh: the states and the fingerprint they were judged against, from one diff hash
   rows="$(ev_table live $EV_ROLES)"
-  if [ "${1:-}" = --json ]; then
+  if [ "${1:-}" = --json ] && [ "${2:-}" = --with-fingerprint ]; then
+    printf '%s\n' "$rows" | jq -R -s --arg req "$req" --arg fp "$EV_REF" '{fingerprint:$fp, roles:(split("\n") | map(select(. != "") | split("\t") | . as $f | {role:$f[0], state:$f[1], verdict:$f[2], trust:$f[3], run:$f[4], required:((($req | split(" ")) | index($f[0])) != null)}))}'
+  elif [ "${1:-}" = --json ]; then
     printf '%s\n' "$rows" | jq -R -s --arg req "$req" 'split("\n") | map(select(. != "") | split("\t") | . as $f | {role:$f[0], state:$f[1], verdict:$f[2], trust:$f[3], run:$f[4], required:((($req | split(" ")) | index($f[0])) != null)})'
   else
     printf '%s\n' "$rows" | while IFS=$'\t' read -r role st v tr run; do

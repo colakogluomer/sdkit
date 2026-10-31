@@ -46,6 +46,7 @@ cat > "$T/bin/claude" <<'X'
 #!/usr/bin/env bash
 echo x >> "${FAKE_CALLS:-/dev/null}"
 [ "${FAKE_RC:-0}" = 0 ] || { echo "${FAKE_ERR:-boom}" >&2; exit "$FAKE_RC"; }
+if [ -n "${FAKE_COST:-}" ]; then jq -n --arg r "$(cat "$FAKE_ANSWER")" --argjson c "$FAKE_COST" '{result:$r, usage:{input_tokens:100,output_tokens:50}, total_cost_usd:$c}'; exit 0; fi
 if [ -n "${FAKE_NOUSAGE:-}" ]; then jq -n --arg r "$(cat "$FAKE_ANSWER")" '{result:$r}'; else jq -n --arg r "$(cat "$FAKE_ANSWER")" '{result:$r, usage:{input_tokens:100,output_tokens:50}}'; fi
 X
 cat > "$T/bin/opencode" <<'X'
@@ -101,7 +102,9 @@ eq "cost comes only from the user's pricing table"        "$(j '[.[] | select(.c
 rm .sdkit/pricing.json
 eq "every adapter lists its capabilities explicitly"      "$(j 'to_entries | map(.value.caps | keys | length) | unique | join(",")' "$RT" capabilities --json)" 8
 eq "no capability claims live verification"               "$(j '[.. | strings | select(. == "verified")] | length' "$RT" capabilities --json)" 0
-eq "cancellation and cost reporting are unsupported everywhere" "$(j '[.[] | .caps | select(.cancellation != "none" or .cost_reporting != "none")] | length' "$RT" capabilities --json)" 0
+eq "cancellation is unsupported everywhere"              "$(j '[.[] | .caps | select(.cancellation != "none")] | length' "$RT" capabilities --json)" 0
+eq "no adapter claims billed or actual cost"              "$(j '[.[] | .caps.cost_reporting] | unique | sort | join(",")' "$RT" capabilities --json)" "estimated,none"
+eq "only claude reports a (client-side, estimated) cost"  "$(j 'to_entries | map(select(.value.caps.cost_reporting == "estimated") | .key) | join(",")' "$RT" capabilities --json)" claude
 # the claims are checked against what run-role really does (routing off: the command line as the flags give it)
 LEG="$(newrepo legacy)"; sed -i.bak 's/^ROUTING=on/ROUTING=off/' "$LEG/.sdkit/sdkit.env"
 for h in claude codex opencode cursor gemini; do
@@ -216,7 +219,15 @@ eq "...the fake CLI ran once"                             "$(calls)" 1
 eq "...the verdict was recorded as trusted evidence"      "$(jq -r '.evidence.verifier | [.result, .trust] | join(",")' "$ST")" "PASS,spawned"
 check "...run-role announced the decision"                grep -q 'routing: execute claude/opus tier=strong' "$T/err"
 eq "valid trusted evidence for this diff is reused"       "$(j '[.action, .reason] | join(",")' dec --role verifier --handoff "$T/handoff")" "reuse,EVIDENCE_REUSED"
-rr verifier "$T/ver-pass" >/dev/null 2>&1; eq "run-role does not run a reused role (exit 7)" "$?" 7
+snap() { { jq -S 'del(.updated)' "$R/.sdkit/work/t1/state.json"; jq -S . "$ST"; wc -l < "$R/.sdkit/work/t1/routing.jsonl" | tr -d ' ' >/dev/null; } | shasum | cut -c1-16; }
+S0="$(snap)"; outs0="$(grep -c '"type":"outcome"' "$R/.sdkit/work/t1/routing.jsonl")"
+rr verifier "$T/ver-pass" >/dev/null 2>"$T/err"; eq "run-role does not run a reused role (exit 7)" "$?" 7
+check "...exit 7 says it is not a failure and not to retry" grep -q 'NOT A FAILURE' "$T/err"
+eq "decide exits 7 for reuse, the success-like code"      "$(rc "$RT" decide --role verifier --handoff "$T/handoff")" 7
+eq "reuse changed neither task state, evidence nor spawn registrations" "$(snap)" "$S0"
+eq "reuse recorded no outcome and so no failure class"    "$(grep -c '"type":"outcome"' "$R/.sdkit/work/t1/routing.jsonl")" "$outs0"
+eq "reuse did not touch the code-correction retry"        "$(jq -r '(.retries // {}) | length' "$R/.sdkit/work/t1/state.json")" 0
+eq "reuse is not counted as a spawn"                      "$(jq -r '.spawns // 0' "$R/.sdkit/work/t1/state.json")" 1
 eq "...no second call was made"                           "$(calls)" 1
 rr verifier "$T/ver-pass" --rerun "second look requested by the user" >/dev/null 2>&1; eq "an explicit --rerun reason runs it again" "$?" 0
 eq "...and is recorded as such"                           "$(jq -rs '[.[] | select(.type=="decision" and .action=="execute")] | last | .reason' "$R/.sdkit/work/t1/routing.jsonl")" RERUN_REQUESTED
@@ -225,11 +236,14 @@ eq "a changed diff makes the evidence stale: execute"     "$(j '[.action, (.note
 eq "...and the stale evidence never satisfied the gate"   "$("$SDD" evidence --json | jq -r '.[] | select(.role=="verifier") | .state')" stale
 eq "no evidence for the security-auditor: execute"        "$(j '.action' dec --role security-auditor --handoff "$T/handoff")" execute
 rr security-auditor "$T/aud-block" >/dev/null 2>&1; eq "a security BLOCK run exits 0 (the verdict is evidence)" "$?" 0
+eq "...--ignore-budget cannot reopen a standing BLOCK"      "$(j '.reason' dec --role security-auditor --handoff "$T/handoff" --ignore-budget)" SECURITY_BLOCK
 eq "a standing security BLOCK is not re-run on the same diff" "$(j '[.action, .reason] | join(",")' dec --role security-auditor --handoff "$T/handoff")" "stop,SECURITY_BLOCK"
 eq "...a different handoff does not change that"          "$(j '.reason' dec --role security-auditor --handoff "$T/handoff2")" SECURITY_BLOCK
 eq "...a different provider does not change that"         "$(j '.reason' dec --role security-auditor --handoff "$T/handoff" --host codex)" SECURITY_BLOCK
 eq "...nor does --rerun"                                  "$(j '.reason' dec --role security-auditor --handoff "$T/handoff" --rerun "please")" SECURITY_BLOCK
-n0="$(calls)"; rr security-auditor "$T/aud-pass" >/dev/null 2>&1; eq "run-role refuses to turn the BLOCK into a PASS (exit 7)" "$?" 7
+n0="$(calls)"; rr security-auditor "$T/aud-pass" >/dev/null 2>"$T/err"; eq "run-role refuses to turn the BLOCK into a PASS (exit 8, not 7)" "$?" 8
+check "...and says it is NOT a success"                   grep -q 'NOT RUN' "$T/err"
+eq "decide exits 8 for a standing BLOCK"                  "$(rc "$RT" decide --role security-auditor --handoff "$T/handoff")" 8
 eq "...and starts nothing"                                "$(calls)" "$n0"
 eq "the recorded evidence is still the BLOCK"             "$(jq -r '.evidence["security-auditor"].result' "$ST")" BLOCK
 rr reviewer "$T/rev-block" >/dev/null 2>&1
@@ -434,6 +448,53 @@ eq "off: explain says run-role ignores the decision"      "$("$RT" explain --rol
 check "no host: legacy error unchanged"                   bash -c "sed -i.bak '/RUN_ROLE_HOST/d' '$R/.sdkit/sdkit.env'; ! '$RR' developer --handoff '$T/handoff' --cwd '$R' --dry-run 2>&1 | grep -q routing"
 
 eq "a misspelt ROUTING value refuses to run (fails closed)" "$(sed -i.bak 's/^ROUTING=.*/ROUTING=ON/' "$R/.sdkit/sdkit.env"; "$RR" developer --handoff "$T/handoff3" --cwd "$R" --host claude --dry-run >/dev/null 2>&1; echo $?)" 2
+
+echo "F06.1: exit codes, probe, cost provenance, fingerprint reuse, benchmark isolation"
+use "$(newrepo xc)"; green medium >/dev/null
+eq "optional skipped exits 8 (not run, not success)"      "$(local_env TOKEN_BUDGET_TASK=1000 USAGE_LOG=1; "$US" log --role developer --in 800 --out 0 --slug t1 --force --tq actual >/dev/null; rc "$RT" decide --role reviewer)" 8
+eq "budget exhausted still exits 3"                       "$("$US" log --role developer --in 800 --out 0 --slug t1 --force --tq actual >/dev/null; rc "$RT" decide --role verifier)" 3
+eq "a refusal by policy still exits 2"                    "$(rc "$RT" decide --role developer --model nope)" 2
+: > .sdkit/sdkit.local.env; rm -f .sdkit/work/t1/usage.jsonl
+dec --role developer --handoff "$T/handoff" --reserve --pid $$ >/dev/null; "$RT" outcome --decision "$(jq -rs 'last | .id' "$R/.sdkit/work/t1/routing.jsonl")" --rc 0 >/dev/null
+eq "a completed duplicate exits 8"                        "$(rc "$RT" decide --role developer --handoff "$T/handoff")" 8
+check "the docs tell callers 7 is reuse and 8 is not run"  bash -c "grep -q 'exit 7' '$KIT/skills/spec-driven-dev/references/hosts.md' && grep -q 'exit 8' '$KIT/skills/spec-driven-dev/references/hosts.md'"
+eq "the benchmark harness never enables routing (7/8 cannot arise there)" "$(grep -rl ROUTING "$KIT/bench" 2>/dev/null | wc -l | tr -d ' ')" 0
+eq "ROUTE_DOWNGRADE_LOW stays off in the shipped template (no comparable F05-B result exists)" "$(sed -n 's/^ROUTE_DOWNGRADE_LOW=//p' "$KIT/templates/sdkit.env")" 0
+# one sdd.sh call gives states and fingerprint; the plain form is unchanged
+use "$(newrepo fp)"; green high >/dev/null
+eq "evidence --json is still an array of roles"            "$("$SDD" evidence --json | jq -r 'type')" array
+eq "evidence --json --with-fingerprint adds the fingerprint it judged against" "$("$SDD" evidence --json --with-fingerprint | jq -r '[.fingerprint == "'"$("$SDD" fingerprint)"'", (.roles | length)] | join(",")')" "true,3"
+# probe: reads only --help of installed CLIs
+PB="$T/pb"; mkdir -p "$PB"; JQD="$(dirname "$(command -v jq)")"
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "fake 9.9"; exit 0; }\necho "  -p, --print   print"; echo "  --model <m>"; echo "  --output-format <f>"; echo "  --disallowedTools <t>"; echo "  --permission-mode <m>"\n' > "$PB/claude"
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "fake 9.9"; exit 0; }\necho "  -p, --print   print"; echo "  --output-format <f>"; echo "  --disallowedTools <t>"; echo "  --permission-mode <m>"\n' > "$PB/claude2"
+chmod +x "$PB/claude" "$PB/claude2"
+eq "probe: flags in --help -> help-verified"               "$(PATH="$PB:$JQD:/usr/bin:/bin" "$RT" capabilities --probe claude | grep -o 'model_selection=[^ ]*')" "model_selection=help-verified"
+mkdir -p "$T/pb2"; cp "$PB/claude2" "$T/pb2/claude"
+eq "probe: a flag missing from --help is named"            "$(PATH="$T/pb2:$JQD:/usr/bin:/bin" "$RT" capabilities --probe claude | grep -o 'model_selection=[^ ]*')" "model_selection=MISSING:--model"
+eq "probe: a CLI that is not installed stays declared and says so" "$(PATH="$PB:$JQD:/usr/bin:/bin" "$RT" capabilities --probe gemini | grep -c 'not installed here')" 1
+eq "only CLIs that were actually checked here carry help-verified" "$(jq -r '[to_entries[] | select(.key | startswith("_") | not) | select([.value.caps[] | select(. == "help-verified")] | length > 0) | .key] | join(",")' "$KIT/core/adapters.json")" "$(jq -r '._checked | keys | join(",")' "$KIT/core/adapters.json")"
+eq "every help-verified capability has probe flags to re-check it" "$(jq -r '[to_entries[] | select(.key | startswith("_") | not) | . as $a | $a.value.caps | to_entries[] | select(.value == "help-verified") | select(($a.value.probe.flags[.key] // []) | length == 0)] | length' "$KIT/core/adapters.json")" 0
+# cost: the host's own estimate is kept apart from the price-table estimate and from anything billed
+printf 'task 4\n' > "$T/handoff4"; printf 'task 5\n' > "$T/handoff5"
+use "$(newrepo cs USAGE_LOG=1)"; green medium >/dev/null; local_env ROUTE_BUDGET_COST=0.05
+rr() { local role="$1" ans="$2"; shift 2; FAKE_ANSWER="$ans" "$RR" "$role" --handoff "$T/handoff" --cwd "$R" "$@"; }
+FAKE_COST=0.0321 rr developer "$T/ver-pass" >/dev/null 2>&1
+eq "a numeric total_cost_usd is stored as a host estimate"  "$(tail -1 .sdkit/work/t1/usage.jsonl | jq -r '[.cost_est_usd, .cost_src] | join(",")')" "0.0321,host-estimate"
+eq "...with provenance in the routing ledger"              "$(jq -rs '[.[] | select(.type=="outcome")] | last | [.host_cost_estimate_usd, .cost_provenance] | join("|")' .sdkit/work/t1/routing.jsonl)" "0.0321|host client-side estimate (not billed)"
+eq "...reported apart from the price-table estimate and the (absent) billed amount" "$(j '.budget.cost | [.host_reported_estimate_usd, .estimated_usd, .actual_usd, .host_reported_runs] | map(tostring) | join(",")' dec --role developer --handoff "$T/handoff2")" "0.0321,null,null,1"
+eq "...the provenance is stated in the decision"           "$(j '.budget.cost.host_reported_provenance | test("not a billed")' dec --role developer --handoff "$T/handoff2")" true
+FAKE_COST=0.04 rr developer "$T/ver-pass" --handoff "$T/handoff2" >/dev/null 2>&1
+eq "the host estimates add up"                             "$(j '.budget.cost.host_reported_estimate_usd' dec --role developer --handoff "$T/handoff3")" 0.0721
+eq "over the money limit: a warning that says whose estimate it is, still executes" "$(j '[.action, (.warnings[] | select(startswith("COST_HOST")) | test("not a bill"))] | map(tostring) | join(",")' dec --role developer --handoff "$T/handoff3")" "execute,true"
+FAKE_COST='"abc"' rr developer "$T/ver-pass" --handoff "$T/handoff3" >/dev/null 2>&1
+eq "a non-numeric cost is ignored, never written as 0"      "$(tail -1 .sdkit/work/t1/usage.jsonl | jq -r 'has("cost_est_usd")')" false
+FAKE_COST=-1 rr developer "$T/ver-pass" --handoff "$T/handoff4" >/dev/null 2>&1
+eq "a negative cost is ignored"                            "$(tail -1 .sdkit/work/t1/usage.jsonl | jq -r 'has("cost_est_usd")')" false
+rr developer "$T/ver-pass" --handoff "$T/handoff5" >/dev/null 2>&1
+eq "no total_cost_usd: no cost field at all (not 0)"        "$(tail -1 .sdkit/work/t1/usage.jsonl | jq -r 'has("cost_est_usd")')" false
+check "run-role never resumes a session (so the cost is per run, not cumulative)" bash -c "! '$RR' developer --handoff '$T/handoff' --cwd '$R' --host claude --dry-run 2>&1 | grep -E -q -- '--(resume|continue)'"
+use "$KIT"
 
 echo "integrity"
 eq "benchmark harness, fixtures and baselines are untouched" "$(ksum)" "$BENCH0"

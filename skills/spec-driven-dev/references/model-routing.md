@@ -48,4 +48,4 @@ after approval; if a task turns out larger, tell the user and ask.
 
 ## Deterministic routing (opt-in)
 With `ROUTING=on` (`sdkit.env`), `run-role.sh` takes host, model, tier, budget and retry/escalation from `scripts/route.sh` instead of the rules above, and `route.sh explain --role <role>` shows
-the decision without running anything. The floors above are enforced in code there. Exit 7 from `run-role.sh` means routing decided not to run (valid evidence reused, duplicate, a BLOCK that stands, optional role skipped); it never means verified. See `docs/design-routing.md`.
+the decision without running anything. The floors above are enforced in code there. Exit 7 from `run-role.sh` means valid evidence already exists (success-like, nothing to retry); exit 8 means routing declined to run and no valid result exists (duplicate, a BLOCK that stands, retries exhausted, optional role skipped). Neither means verified by itself: the phase gate (`sdd.sh evidence`) decides. See `docs/design-routing.md`.

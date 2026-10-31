@@ -24,8 +24,9 @@
 #   An answer that is not a valid verdict block, or that sdd.sh refuses (the diff changed meanwhile), exits 6.
 # Routing (F06, opt-in ROUTING=on in sdkit.env): scripts/route.sh decides adapter, model, tier, budget and whether to run, reuse, retry or escalate; this script
 #   executes that decision and records how the run ended. Off (default) = the behaviour above, unchanged. A decision that is not execute/retry/escalate starts nothing:
-#   exit 3 budget exhausted, exit 2 refused by policy/config, exit 7 not run (valid evidence reused, duplicate, standing BLOCK, retries exhausted, optional role skipped).
-# Exit: the host CLI's status; 127 when its CLI is not installed; 2 on usage errors; 3 budget; 7 routing decided not to run; for a contracted handoff also 4 when the answer
+#   exit 3 budget exhausted, exit 2 refused by policy/config, exit 7 valid evidence reused (success-like: nothing to run, nothing to retry), exit 8 not run and nothing valid
+#   exists (duplicate, standing BLOCK, retries/escalation exhausted, optional role skipped, ...): never treat 8 as success.
+# Exit: the host CLI's status; 127 when its CLI is not installed; 2 on usage errors; 3 budget; 7 routing reused valid evidence; 8 routing declined to run; for a contracted handoff also 4 when the answer
 #   breaks the contract and 5 when it is valid but reports partial|blocked|failed (exit 0 = valid and done; it never means verified); 6 when an evidence role's
 #   answer could not be recorded as a verdict.
 # UNVERIFIED against live CLIs: flag spellings per host below follow each tool's documented headless mode; run with
@@ -87,6 +88,10 @@ if [ "${ROUTING:-off}" = on ]; then
   case "$act" in
     execute|retry|escalate) ;;
     *) echo "run-role: routing: $act ($rsn)$(printf '%s' "$dj" | jq -r '(.notes // []) | if length > 0 then ": " + join("; ") else "" end')" >&2
+       case "$act" in
+         reuse) echo "run-role: exit 7 = NOT A FAILURE: valid evidence for this diff already exists, nothing was run and nothing should be retried (read it: sdd.sh evidence)" >&2 ;;
+         stop) [ "$drc" = 8 ] && echo "run-role: exit 8 = NOT RUN: routing declined to start it and no valid result exists for this request; this is not a verification and not a pass" >&2 ;;
+       esac
        if [ "$rsn" = BUDGET_EXHAUSTED ]; then
          echo "run-role: task state is unchanged; raise the limit in $KIT_DIR/sdkit.local.env, or ask the user and re-run with --ignore-budget" >&2; tele failure --category budget --role "$role" --source run-role
        fi
@@ -130,8 +135,8 @@ prompt="$(printf 'You are running as the "%s" role of the spec-driven-kit workfl
 
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 # rr_close <exit status> [verdict status]: tell the routing ledger how the decided run ended (no-op without routing); never changes the exit status
-tq=unavailable; tin=0; tout=0; rdur=""
-rr_close() { [ -n "$rid" ] && [ "$dry" = 0 ] && "$here/route.sh" outcome --decision "$rid" --rc "$1" ${2:+--prc "$2"} --stderr "$tmp.err" ${rdur:+--dur-ms "$rdur"} --tokens "$tq" --in "$tin" --out "$tout" >/dev/null 2>&1; return 0; }
+tq=unavailable; tin=0; tout=0; rdur=""; hcost=""
+rr_close() { [ -n "$rid" ] && [ "$dry" = 0 ] && "$here/route.sh" outcome --decision "$rid" --rc "$1" ${2:+--prc "$2"} --stderr "$tmp.err" ${rdur:+--dur-ms "$rdur"} ${hcost:+--cost-est "$hcost"} --tokens "$tq" --in "$tin" --out "$tout" >/dev/null 2>&1; return 0; }
 cli=""; args=()
 case "$host" in
   claude)
@@ -210,7 +215,9 @@ case "$host" in
   claude)
     answer="$(jq -r '.result // empty' "$raw" 2>/dev/null)"
     read -r tin tout cr cw < <(jq -r '[.usage.input_tokens // 0, .usage.output_tokens // 0, .usage.cache_read_input_tokens // 0, .usage.cache_creation_input_tokens // 0] | @tsv' "$raw" 2>/dev/null || echo "0 0 0 0")
-    jq -e '.usage.input_tokens != null and .usage.output_tokens != null' "$raw" >/dev/null 2>&1 && tq=actual ;;
+    jq -e '.usage.input_tokens != null and .usage.output_tokens != null' "$raw" >/dev/null 2>&1 && tq=actual
+    # total_cost_usd is Claude Code's CLIENT-SIDE estimate (not a bill; cumulative if a session is resumed, which this script never does): kept as a host estimate, apart from tokens
+    hcost="$(jq -r '.total_cost_usd | select(type == "number" and . >= 0)' "$raw" 2>/dev/null)" ;;
   cursor) answer="$(jq -r '.result // empty' "$raw" 2>/dev/null)" ;;
   gemini)
     answer="$(jq -r '.response // empty' "$raw" 2>/dev/null)"
@@ -230,7 +237,7 @@ else
   tele agent.end --span "$span" --role "$role" --host "$host" --model "$model" --tier "$tier" --outcome ok --dur-ms "$dur" --q duration=actual --q tokens=unavailable --source run-role
 fi
 [ -x "$here/usage.sh" ] && "$here/usage.sh" log --role "$role" --tier "$tier" --host "$host" --model "$model" \
-  --in "${tin:-0}" --out "${tout:-0}" --cache-read "${cr:-0}" --cache-write "${cw:-0}" --tq "$tq" --source run-role >/dev/null 2>&1
+  --in "${tin:-0}" --out "${tout:-0}" --cache-read "${cr:-0}" --cache-write "${cw:-0}" --tq "$tq" ${hcost:+--cost-est "$hcost"} --source run-role >/dev/null 2>&1
 erc=0; prc=""; rdur="$dur"
 if [ -n "$evrun" ]; then
   pa=(); prop="$(jq -r '.proposal // empty' "$top/$KIT_DIR/.sdd/state.json" 2>/dev/null)"

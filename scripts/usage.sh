@@ -2,7 +2,9 @@
 # Token ledger: one JSON line per agent run, so cost can be measured instead of guessed. Off unless USAGE_LOG=1 in sdkit.env
 # (log is then a silent no-op). File: <project-dir>/work/<slug>/usage.jsonl (personal, gitignored).
 #   usage.sh log --role R [--tier T] [--host H] [--model M] [--in N] [--out N] [--cache-read N] [--cache-write N]
-#                [--slug S] [--id ID] [--source X] [--tq actual|unavailable] [--force]
+#                [--slug S] [--id ID] [--source X] [--tq actual|unavailable] [--cost-est USD] [--force]
+#       --cost-est USD is the HOST'S OWN client-side cost estimate for that run (Claude Code's total_cost_usd), stored as cost_est_usd with cost_src "host-estimate".
+#       It is not a billed amount and not the kit's price-table estimate (pricing.json); the three are kept apart. Never written when the host did not print it.
 #       --tq unavailable marks a run whose host printed no token usage: its in/out/cache fields are 0 only because nothing was read, not because nothing was used
 #       (route.sh counts such runs as unmeasured, never as zero)
 #       --id makes the line replace an earlier line with the same id (snapshots of a growing session)
@@ -25,12 +27,12 @@ current_slug() {  # the open SDD task, else the most recently updated work/*/sta
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   log)
-    role=""; tier=""; host=""; model=""; tin=0; tout=0; cr=0; cw=0; slug=""; id=""; source=""; force=0; tq=""
+    role=""; tier=""; host=""; model=""; tin=0; tout=0; cr=0; cw=0; slug=""; id=""; source=""; force=0; tq=""; cest=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --role) role="$2"; shift ;; --tier) tier="$2"; shift ;; --host) host="$2"; shift ;; --model) model="$2"; shift ;;
         --in) tin="$2"; shift ;; --out) tout="$2"; shift ;; --cache-read) cr="$2"; shift ;; --cache-write) cw="$2"; shift ;;
-        --slug) slug="$2"; shift ;; --id) id="$2"; shift ;; --source) source="$2"; shift ;; --tq) tq="$2"; shift ;; --force) force=1 ;;
+        --slug) slug="$2"; shift ;; --id) id="$2"; shift ;; --source) source="$2"; shift ;; --tq) tq="$2"; shift ;; --cost-est) cest="$2"; shift ;; --force) force=1 ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
       esac
       shift
@@ -40,8 +42,8 @@ case "$cmd" in
     [ -n "$slug" ] || slug="$(current_slug)"
     mkdir -p "$work/$slug"; file="$work/$slug/usage.jsonl"
     line="$(jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg role "$role" --arg tier "$tier" --arg host "$host" --arg model "$model" \
-      --arg id "$id" --arg source "$source" --arg tq "$tq" --argjson i "${tin:-0}" --argjson o "${tout:-0}" --argjson cr "${cr:-0}" --argjson cw "${cw:-0}" \
-      '{ts:$ts, role:$role, tier:$tier, host:$host, model:$model, id:$id, source:$source, in:$i, out:$o, cache_read:$cr, cache_write:$cw} + (if $tq != "" then {tq:$tq} else {} end)')"
+      --arg id "$id" --arg source "$source" --arg tq "$tq" --arg cest "$cest" --argjson i "${tin:-0}" --argjson o "${tout:-0}" --argjson cr "${cr:-0}" --argjson cw "${cw:-0}" \
+      '{ts:$ts, role:$role, tier:$tier, host:$host, model:$model, id:$id, source:$source, in:$i, out:$o, cache_read:$cr, cache_write:$cw} + (if $tq != "" then {tq:$tq} else {} end) + (if ($cest | test("^[0-9]+([.][0-9]+)?$")) then {cost_est_usd:($cest | tonumber), cost_src:"host-estimate"} else {} end)')"
     # agents finish at the same time: the replace-then-append runs under a lock, or lines of parallel agents are lost
     sdkit_lock "$file"
     if [ -n "$id" ] && [ -f "$file" ]; then

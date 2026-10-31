@@ -14,6 +14,8 @@ The workflow is written host-neutral. This table says how each primitive is done
 Any host, any role, as a separate headless process (fresh context, pinned to a directory, read-only when the role is):
 `<kit>/scripts/run-role.sh <role> --handoff F --cwd D --host H`. Default host: `VERIFIER_HOST` for verifier roles, else `RUN_ROLE_HOST`
 (`sdkit.env`); a verifier on another vendor gives the most independent check. Use `--dry-run` to see the command.
+Exit codes with `ROUTING=on` (opt-in, `design-routing.md`): 0 ran; **exit 7 = valid evidence for this diff already exists, nothing was run: success-like, do not retry and do not call `state.sh retry`** (read it with `sdd.sh evidence`);
+**exit 8 = routing declined to run and no valid result exists** (duplicate, standing BLOCK, retries exhausted, optional role skipped): never treat it as a pass, read the printed reason; exit 3 budget, exit 2 refused by policy/config.
 
 `<project-dir>` is `.sdkit/` for every host (a repo set up before 1.0 may still use `.claude/`, `.codex/` or `.agentkit/`). Claude Code's own files (`CLAUDE.md`, `settings.local.json`, copy-mode `agents/ skills/ hooks/`) stay under `.claude/`; the kit generates them per machine and hides them from git, only `AGENTS.md` and the kit block in `CLAUDE.md` are committed.
 
