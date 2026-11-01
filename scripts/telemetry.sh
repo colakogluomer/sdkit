@@ -162,7 +162,7 @@ ledger_for() {  # the usage ledger next to an events file, if any
 # summary_json <events file> <run id|""> <ledger file|""> <prices file|"">
 summary_json() {
   local ev="$1" run="$2" led="$3" prices="$4" pj='{}' lj='[]'
-  [ -f "$prices" ] && pj="$(jq -c . "$prices" 2>/dev/null || echo '{}')"
+  [ -f "$prices" ] && pj="$(sdkit_prices_flat "$prices")"
   [ -n "$led" ] && [ -f "$led" ] && lj="$(jq -sc . "$led" 2>/dev/null || echo '[]')"
   jq -sc --arg run "$run" --argjson prices "$pj" --argjson ledger "$lj" '
     def secs($a; $b): (($b | fromdateiso8601) - ($a | fromdateiso8601));
@@ -209,6 +209,17 @@ summary_json() {
                else {usd: ($priced | map(. as $x | $prices[$x.model] | (($x.in // 0) * (.in // 0) + ($x.out // 0) * (.out // 0) + ($x.cache_read // 0) * (.cache_read // 0) + ($x.cache_write // 0) * (.cache_write // 0)) / 1000000) | add // 0),
                     quality: "estimated", unpriced_runs: (($tk | length) - ($priced | length)), note: "user-supplied USD per million tokens"} end),
         retries: ($e | map(select(.type == "retry")) | length),
+        efficiency: ($e | map(select(.type == "failure" and .category == "verdict-malformed")) as $vm
+                     | ($e | map(select(.type == "verify.result" and (.outcome == "block" or .outcome == "BLOCK"))) | length) as $blk
+                     | {agent_executions: ($ag | length),
+                        format_retries: ($vm | map(select((.reason // "malformed") != "inconsistent")) | length),
+                        semantic_retries: ($vm | map(select(.reason == "inconsistent")) | length),
+                        block_reasons: ($e | map(select(.type == "failure" and (.category == "verdict-block" or .category == "gate" or .category == "tests")) | (.category + ":" + (.reason // "unspecified"))) | group_by(.) | map({key: .[0], value: length}) | from_entries),
+                        blocks: $blk,
+                        accepted: ($ph | map(.to) | index("verified") != null),
+                        cost_per_accepted_task_usd: (if ($ph | map(.to) | index("verified")) != null and ($prices | length) > 0 and ($tk | length) > 0
+                          then ($priced | map(. as $x | $prices[$x.model] | (($x.in // 0) * (.in // 0) + ($x.out // 0) * (.out // 0) + ($x.cache_read // 0) * (.cache_read // 0) + ($x.cache_write // 0) * (.cache_write // 0)) / 1000000) | add // 0) else null end),
+                        cost_complete: (($ag | length) > 0 and ($tk | length) == ($ag | length) and ($priced | length) == ($tk | length))}),
         failures: {total: ($e | map(select(.type == "failure")) | length),
                    by_category: ($e | map(select(.type == "failure") | .category) | group_by(.) | map({key: .[0], value: length}) | from_entries),
                    gate_rejections: ($e | map(select(.type == "phase.reject")) | length)},
@@ -249,6 +260,7 @@ render() {  # render a summary JSON (stdin) as text
     "",
     "tokens (\(.tokens.quality)): in \(.tokens.in)  out \(.tokens.out)  cache_read \(.tokens.cache_read)  cache_write \(.tokens.cache_write)   measured \(.tokens.runs_measured) of \(.tokens.runs_measured + .tokens.runs_unmeasured) runs\(if .tokens.complete then "" else "  (INCOMPLETE: unmeasured runs are not counted)" end)",
     (if .cost.usd == null then "cost: unavailable (\(.cost.reason))" else "cost (estimated): $\(.cost.usd * 10000 | round / 10000)  unpriced runs \(.cost.unpriced_runs)" end),
+    "efficiency: executions \(.efficiency.agent_executions)   format retries \(.efficiency.format_retries)   semantic retries \(.efficiency.semantic_retries)   blocks \(.efficiency.blocks)   accepted \(.efficiency.accepted)   cost/accepted \(if .efficiency.cost_per_accepted_task_usd == null then "unavailable" else "$\(.efficiency.cost_per_accepted_task_usd * 10000 | round / 10000)\(if .efficiency.cost_complete then "" else " (PARTIAL: unmeasured or unpriced runs)" end)" end)",
     "retries \(.retries)   failures \(.failures.total) \(.failures.by_category | to_entries | map("\(.key)=\(.value)") | join(" "))   gate rejections \(.failures.gate_rejections)",
     (if .workflow.profile != null then "workflow: profile \(.workflow.profile)   decisions \(.workflow.decisions | length)   rejections \(.workflow.rejections_by_reason | to_entries | map("\(.key)=\(.value)") | join(" "))" else empty end),
     (if .contracts.checked > 0 then "contracts: \(.contracts.checked) checked, \(.contracts.valid) valid, \(.contracts.invalid) invalid \(.contracts.by_reason | to_entries | map("\(.key)=\(.value)") | join(" "))   agent status \(.contracts.by_status | to_entries | map("\(.key)=\(.value)") | join(" "))   handoff bytes \(.contracts.handoff_bytes)  result bytes \(.contracts.result_bytes)   (a valid contract is not a verification)" else empty end),
@@ -272,6 +284,43 @@ case "$cmd" in
     prices="${TELEMETRY_PRICES:-$top/$KIT_DIR/pricing.json}"
     out="$(summary_json "$file" "$run" "$(ledger_for "$file")" "$prices")" || { echo "telemetry: cannot read $file" >&2; exit 1; }
     if [ "$json" = 1 ]; then printf '%s\n' "$out"; else printf '%s\n' "$out" | render; fi ;;
+  trace)
+    # F17: one task's story, chronological, joined by ids: task -> phase -> role/execution (span) -> usage-ledger request row -> routing decision -> gate result.
+    # Identifiers, roles, numbers, outcomes and reason codes only. Notes, prompts, answers and file paths are never printed (a failed task is explained
+    # without exposing source or transcripts). --json: the same rows as JSON for an external viewer; nothing is sent anywhere.
+    slug=""; run=""; file=""; json=0
+    while [ $# -gt 0 ]; do case "$1" in --run) run="$2"; shift ;; --file) file="$2"; shift ;; --json) json=1 ;; -*) echo "unknown option $1" >&2; exit 2 ;; *) slug="$1" ;; esac; shift; done
+    [ -n "$file" ] || file="$(events_file "$slug")"
+    [ -s "$file" ] || { echo "no events recorded for ${slug:-the current task} (set TELEMETRY=1 in sdkit.local.env)"; exit 0; }
+    led="$(ledger_for "$file")"; ljson='[]'; [ -n "$led" ] && [ -f "$led" ] && ljson="$(jq -sc . "$led" 2>/dev/null || echo '[]')"
+    rj='[]'; rf="$(dirname "$file")/routing.jsonl"; [ -f "$rf" ] && rj="$(jq -sc . "$rf" 2>/dev/null || echo '[]')"
+    rows="$(jq -sc --arg run "$run" --argjson led "$ljson" --argjson rt "$rj" '
+      map(select(type == "object" and .ts != null and .type != null)) as $all
+      | (if $run != "" then $run else ($all | map(select(.type == "task.start")) | last // ($all | last) | .run // "") end) as $r
+      | ($all | map(select(.run == $r))) as $e
+      | [ $e[] | {ts, kind: .type, phase: (.phase // .to // null), role: (.role // null), span: (.span // null), tier: (.tier // null), host: (.host // null), model: (.model // null),
+          outcome: (.outcome // null), category: (.category // null), reason: (.reason // null), status: (.status // null), attempt: (.attempt // null),
+          dur_ms: (.dur_ms // null), tokens: (if .in != null then {in, out, cache_read, cache_write, quality: (.q.tokens // null)} else null end)} ]
+      | map(. as $x | if $x.span != null and $x.kind == "agent.end" then . + {ledger_row: (($led | map(select(.id == $x.span)) | last) as $l | if $l == null then null else {in: $l.in, out: $l.out, cache_read: $l.cache_read, cache_write: $l.cache_write, tq: ($l.tq // "actual"), model: $l.model} end)} else . end)
+      | . + ($rt | map({ts, kind: ("route." + .type), role, decision: .id, action: (.action // null), reason: (.reason // null), outcome: (.class // null), attempt: (.attempt // null), tier: (.tier // null), host: (.adapter // null), model: (.model // null)}))
+      | sort_by(.ts)' "$file" 2>/dev/null)" || { echo "telemetry: cannot read $file" >&2; exit 1; }
+    if [ "$json" = 1 ]; then printf '%s\n' "$rows" | jq .; else
+      printf '%s\n' "$rows" | jq -r '
+        def d: if . == null then "" else " " + tostring end;
+        .[] | "\(.ts | sub("T"; " ") | sub("Z"; "")) \(.kind | (. + "              ")[0:18])"
+          + (if .phase then " phase=\(.phase)" else "" end) + (if .role then " role=\(.role)" else "" end) + (if .span then " span=\(.span)" else "" end)
+          + (if .decision then " decision=\(.decision)" else "" end) + (if .action then " action=\(.action)" else "" end)
+          + (if .host then " host=\(.host)" else "" end) + (if .model then " model=\(.model)" else "" end) + (if .tier then " tier=\(.tier)" else "" end)
+          + (if .attempt then " attempt=\(.attempt)" else "" end) + (if .dur_ms then " dur=\(.dur_ms / 1000 | floor)s" else "" end)
+          + (if .tokens then " tokens(in/out/cr/cw)=\(.tokens.in // "-")/\(.tokens.out // "-")/\(.tokens.cache_read // "-")/\(.tokens.cache_write // "-")" else "" end)
+          + (if .ledger_row then " ledger(\(.ledger_row.tq))=\(.ledger_row.in)/\(.ledger_row.out)" else "" end)
+          + (if .outcome then " outcome=\(.outcome)" else "" end) + (if .category then " category=\(.category)" else "" end) + (if .reason then " reason=\(.reason)" else "" end)'
+      echo "--"
+      printf '%s\n' "$rows" | jq -r '
+        ([.[] | select(.kind == "failure" or .kind == "phase.reject" or (.kind == "verify.result" and (.outcome | tostring | test("block|BLOCK|malformed"))))] | last) as $f
+        | if $f == null then "explain: no failure, rejection or BLOCK recorded in this run"
+          else "explain: last problem = \($f.kind) at \($f.ts)\($f.category | if . then " category=" + . else "" end)\($f.reason | if . then " reason=" + . else "" end)\($f.outcome | if . then " outcome=" + . else "" end)\($f.role | if . then " role=" + . else "" end)" end'
+    fi ;;
   list)
     shopt -s nullglob
     printf 'task\trun\tstatus\tmode\tagents\ttokens(in+out)\tsource\n'
@@ -296,8 +345,8 @@ case "$cmd" in
     mkdir -p "$work/_archive" && run="$(run_id "$s")" || exit 0
     cp "$work/$s/events.jsonl" "$work/_archive/$s.events.jsonl"
     [ -f "$work/$s/usage.jsonl" ] && cp "$work/$s/usage.jsonl" "$work/_archive/$s.usage.jsonl"
+    for x in routing context selection; do [ -f "$work/$s/$x.jsonl" ] && cp "$work/$s/$x.jsonl" "$work/_archive/$s.$x.jsonl"; done   # the Value Report can be rebuilt from the archive
     summary_json "$work/$s/events.jsonl" "" "$work/$s/usage.jsonl" "${TELEMETRY_PRICES:-$top/$KIT_DIR/pricing.json}" > "$work/_archive/$s.summary.json"
     echo "archived to $KIT_DIR/work/_archive/$s.{events.jsonl,summary.json}" ;;
   *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
-    for x in routing context selection; do [ -f "$work/$s/$x.jsonl" ] && cp "$work/$s/$x.jsonl" "$work/_archive/$s.$x.jsonl"; done   # the Value Report can be rebuilt from the archive

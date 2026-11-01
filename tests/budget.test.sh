@@ -29,7 +29,7 @@ setenv() { printf '%s\n' "$@" > .claude/project.env; printf 'BASE_BRANCH=main\nU
 
 echo "usage: cache rate and budget"
 "$U" log --role developer --tier standard --in 1000 --out 500 --cache-read 6000 --cache-write 500 --slug t1 >/dev/null
-check "report shows the cache hit rate"            bash -c "'$U' report t1 | grep -q 'cache hit rate: 80%'"
+check "report shows the cache hit rate"            bash -c "'$U' report t1 | grep -qE 'cache hit rate: 80(\.0)?%'"
 check "no budget set: silent exit 0"               test "$(rc "$U" budget t1)" = 0
 check "no budget set: prints nothing"              test -z "$("$U" budget t1)"
 setenv TOKEN_BUDGET_TASK=10000

@@ -28,7 +28,8 @@ case $? in
   2) tele="$(kit_cmd "" scripts/telemetry.sh)"   # telemetry (TELEMETRY=1): a verdict that could not be recorded is a failure of its own kind
      if [ "${TELEMETRY:-}" = 1 ] && [ -x "$tele" ]; then
        "$tele" emit verify.result --outcome malformed --source verifier >/dev/null 2>&1
-       "$tele" emit failure --category verdict-malformed --source verifier >/dev/null 2>&1
+       case "$summary" in *"MALFORMED[semantic]"*) mr=inconsistent ;; *) mr=malformed ;; esac
+       "$tele" emit failure --category verdict-malformed --reason "$mr" --role "$role" --source verifier >/dev/null 2>&1
      fi
      case "$role" in verifier) fmt="DOD / FINDINGS / VERIFY / VERDICT" ;; reviewer) fmt="findings, SUMMARY and VERDICT" ;; *) fmt="findings, SUMMARY, NO FINDINGS (when empty) and VERDICT" ;; esac
      jq -n --arg m "$role verdict NOT recorded: $summary. Ask the $role once for the exact $fmt format." '{systemMessage:$m}' ;;

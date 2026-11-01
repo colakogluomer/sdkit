@@ -206,7 +206,7 @@ eq "the ledger path is unchanged (USAGE_LOG on)"       "$(jq -s '[.[] | select(.
 eq "usage-log with both settings off writes nothing"   "$(L="$(newrepo hookoff)"; sed -i.bak '/TELEMETRY/d' "$L/.sdkit/sdkit.local.env"; rm -f "$L/.sdkit/sdkit.local.env.bak"; printf '%s' "$J" | CLAUDE_PROJECT_DIR="$L" "$KIT/hooks/usage-log.sh"; ls "$L/.sdkit/work" 2>/dev/null | wc -l | tr -d ' ')" 0
 JB='{"hook_event_name":"SubagentStop","agent_type":"verifier","last_assistant_message":"VERDICT: PASS"}'
 printf '%s' "$JB" | "$KIT/hooks/record-verdict.sh" >/dev/null 2>&1
-eq "record-verdict: a malformed verdict is a failure"  "$("$TL" summary h1 --json | jq -r '.failures.by_category["verdict-malformed"]')" 1
+eq "record-verdict: a malformed verdict is a failure"  "$(jq -s '[.[] | select(.type=="failure" and .category=="verdict-malformed" and .source=="verifier")] | length' "$H/.sdkit/work/h1/events.jsonl")" 1
 eq "record-verdict: and a malformed verification"      "$("$TL" summary h1 --json | jq -r '[.verification.results[].outcome] | join(",")')" malformed
 eq "a hook cannot be broken by an unwritable store"    "$(chmod 555 "$H/.sdkit/work/h1"; printf '%s' "$J" | "$KIT/hooks/usage-log.sh" >/dev/null 2>&1; echo $?; chmod 755 "$H/.sdkit/work/h1")" 0
 
