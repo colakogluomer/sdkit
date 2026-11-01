@@ -51,6 +51,20 @@ tests/risk-floor.test.sh                                            # risk floor
 tests/hardening.test.sh                                            # F00.5: verdict doğrulama, eşzamanlı yazım, ayar dosyası çalıştırmama, görev çözümü, önbellek, STACK
 tests/report.test.sh                                               # Value Report: görev/oturum raporu, tasarruf aritmetiği, çift sayım, tek seferlik üretim, LLM çağrısı yok
 tests/workflow.test.sh                                             # F03: profiller, geçiş tablosu, red nedenleri, sözleşme politikası, eşzamanlılık, telemetri
+tests/usage.test.sh                                               # F07: kullanım/maliyet muhasebesi, fiyat çözümü, tekilleştirme, kapsam uyarıları
+tests/efficiency.test.sh                                           # F08: verdict normalizasyonu, format/semantic ayrımı, kanıtsız PASS, erken DoD denetimi
+tests/context.test.sh                                              # F09: sınırlı çıktı, ENVELOPE/1, hata satırları korunur
+tests/selection.test.sh                                            # F10: değişen dosya → test eşlemesi, pipe hatası, önbellek
+tests/costbase.test.sh                                             # F11: sabit-veri taban çizgisi ve karşılaştırma korumaları
+tests/adapter.test.sh                                              # F12: adaptör sözleşmesi, sahte harici adaptör
+tests/litellm.test.sh                                              # F13: OpenAI uyumlu adaptör (sahte curl): politika, çıkış izni, sır
+tests/costroute.test.sh                                            # F14: sert maliyet politikası, rezervasyon, bilinmeyen
+tests/dispatch.test.sh                                             # F15: paralel dağıtım kuralları
+tests/knowledge.test.sh                                            # F16: içerik hash'li notlar
+tests/trace.test.sh                                                # F17: iz (içeriksiz)
+tests/recover.test.sh                                              # F18: kurtarma, idempotent
+tests/security.test.sh                                             # F19: redaksiyon, denetim zinciri, statik politika
+tests/ci.test.sh                                                   # F20: ucuz PR denetimi, regresyon geçmişi
 tests/evidence.test.sh                                             # F04: yüksek risk kanıtı (3 rol), güven/kimlik, bayatlık, sahtecilik, eşzamanlılık, adaptör iddiaları
 tests/contract.test.sh                                             # F02: ajan sözleşmeleri (doğrulama, kayıt, hook, run-role, verifier bağımsızlığı, geriye uyum, sözleşme benchmark'ları)
 tests/route.test.sh                                               # F06: yönlendirme kararları, kayıt defteri, zamanlama, yeniden deneme/yükseltme, bütçe, run-role bütünleşmesi (sahte CLI; model çağrısı yok)

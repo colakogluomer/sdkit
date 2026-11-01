@@ -112,7 +112,7 @@ bench/run.sh run <senaryo|all> --real --host claude [--verifier-host codex] --ye
 bench/run.sh compare A.json B.json
 ```
 
-Fiyat tablosu örneği (`pricing.json`; değerleri kendi sözleşmenizden doldurun, kit değer vermez):
+Fiyat tablosu (F07: sürümlü v2 biçimi, model/sağlayıcı/etkin tarih; ayrıntı [design-usage.md](design-usage.md) §3). Eski düz biçim de geçerlidir. Örnek (`pricing.json`; değerleri kendi sözleşmenizden doldurun, kit değer vermez):
 
 ```json
 { "<model-kimliği>": { "in": 0.0, "out": 0.0, "cache_read": 0.0, "cache_write": 0.0 } }
@@ -183,3 +183,6 @@ Son satır, "eksik veri" yolunun sınanmış halidir: üç koşu (scout ve codex
 4. **Önce baseline'ı kaydet:** F02 başlamadan `bench/run.sh run all --real --host <h> --yes` ile gerçek temel koşuyu bir kez alın (kullanıcı kararı, maliyetli) ve JSON'ları saklayın; simüle sayılar karşılaştırma tabanı olamaz.
 5. Claude'da `agent.start` için `PreToolUse: Agent` hook'u bütçe kapalıyken de çalışmalı (yalnızca olay yazan, hiç engellemeyen biçimde); F02 paralel ajan sayısını ölçmek isterse gerekir.
 6. Sözleşmeli roller `run-role.sh --out` çıktısını `parse-*.sh` ile doğrulayıp ihlalde tek yeniden deneme yapacaksa, mevcut `state.sh retry` ve `retry` olayı yeniden kullanılabilir.
+
+## F17 — `telemetry.sh trace [slug] [--run ID] [--json]`
+Bir görevin hikâyesi, zamana göre sıralı ve kimliklerle bağlı: görev → faz → rol/yürütme (`span`) → kullanım defteri satırı (istek düzeyi sayılar, `ledger(...)`) → yönlendirme kararı (`decision=rd-…`) → kapı sonucu. Yalnız kimlik, rol, sayı, sonuç ve neden kodu basılır; **not, istem, cevap ve dosya yolu asla**. Son satır `explain:` en son sorunu (failure / phase.reject / BLOCK) adlandırır. `--json` dışa aktarım içindir; hiçbir yere gönderilmez. `tests/trace.test.sh`.

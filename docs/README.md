@@ -19,6 +19,7 @@ Nereden başlayacağını role göre seç.
 | İş akışı **profillerini** (small/standard/high-assurance), faz geçişlerini, hata/yeniden deneme politikasını anlamak | [design-workflow.md](design-workflow.md) | [../skills/spec-driven-dev/references/workflow.md](../skills/spec-driven-dev/references/workflow.md) |
 | **Yüksek riskte** reviewer/security-auditor zorlamasını, kanıt geçerliliğini ve host yetenek matrisini anlamak | [design-evidence.md](design-evidence.md) | [design-workflow.md](design-workflow.md) |
 | Hangi **ajanın/modelin** çalışacağını, bütçeyi, yeniden denemeyi ve yükseltmeyi (F06) anlamak | [design-routing.md](design-routing.md) | [design-evidence.md](design-evidence.md) |
+| **Token kullanımının ve maliyetin** nasıl hesaplandığını, fiyat tablosunu (`pricing.json`), `usage.sh report/scan` çıktısını ve eksik veri uyarılarını (F07) anlamak | [design-usage.md](design-usage.md) | [design-telemetry.md](design-telemetry.md) |
 | Aynı görevi **ajanlı geliştirme ile SDKit'in** çözdüğü doğruluk ve maliyet karşılaştırmasını (benchmark altyapısı, F05-A) anlamak | [design-benchmark.md](design-benchmark.md) | [design-telemetry.md](design-telemetry.md) |
 | **Kit'in kendisini** değiştireceğim | [../CONTRIBUTING.md](../CONTRIBUTING.md) | [guide.md](guide.md) §14, §15 |
 
@@ -30,6 +31,9 @@ Nereden başlayacağını role göre seç.
 | [design-sdkit-dir.md](design-sdkit-dir.md) | Tasarım kaydı: tek `.sdkit/` dizini, kişisel `sdkit.env`, neyin git'e girdiği, doğrulamalar ve sapmalar (1.0.0) |
 | [audit-architecture.md](audit-architecture.md) | Mimari ve yetenek denetimi (F00): bileşen haritası, yetenek envanteri, yaşam döngüleri, bulgular, öncelikli liste, önerilen ADR'ler |
 | [design-routing.md](design-routing.md) | Akıllı orkestrasyon (F06): karar motoru, model kayıt defteri, yürütme sözleşmesi, yeniden deneme/yükseltme, bütçe (sert/danışma), yönlendirme matrisi, güven sınırları |
+| [design-usage.md](design-usage.md) | Kullanım ve maliyet muhasebesi (F07): kök nedenler, defter şeması v2, tekilleştirme, fiyat çözümü, rapor, önce/sonra, sınırlar |
+| [design-adapters.md](design-adapters.md) | Yürütme adaptörü sözleşmesi (F12) ve isteğe bağlı LiteLLM (F13) |
+| [design-security.md](design-security.md) | Güvenlik sertleştirme (F19): redaksiyon, denetim izi, statik politika |
 | [design-benchmark.md](design-benchmark.md) | Görev benchmark'ı (F05-A): görev kaydı, yalıtım ve güvenlik sınırı, stratejiler, metrikler (host başına), simülasyon, rapor, F05-B önkoşulları |
 | [design-telemetry.md](design-telemetry.md) | Temel ölçüm ve telemetri (F01): olay şeması, hangi metrik güvenilir, benchmark çerçevesi, simüle sonuçlar, sınırlar, F02 önerileri |
 | [design-contracts.md](design-contracts.md) | Ajan sözleşmeleri (F02): devir/sonuç biçimi, doğrulama kategorileri, host durumu, benchmark ek yükü, geçiş, sınırlar |

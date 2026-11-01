@@ -61,8 +61,10 @@ Görev: `- [ ] T3 açıklama | role: developer | size: medium | writes: yol/ | a
 
 ```bash
 <kit>/scripts/state.sh <slug> show              # görev durumu (work/<slug>/state.json); /clear veya çökmeden sonra buradan devam
-<kit>/scripts/usage.sh report [slug]            # rol/katman başına token + önbellek isabet oranı (USAGE_LOG=1 gerekir)
 sdkit report task|session|latest|history [--detailed|--json|--markdown]   # Value Report: kim ne yaptı, ne harcadı, neyi tasarruf etti (VALUE_REPORT=on ile görev/oturum sonunda otomatik)
+<kit>/scripts/usage.sh report [slug] [--project] [--session ID|current] [--json]   # rol/model/oturum başına token, önbellek isabeti, tahmini USD (API-eşdeğeri), kapsam uyarıları (USAGE_LOG=1 gerekir)
+<kit>/scripts/usage.sh scan [--session ID]       # hook'un görmediği Claude Code oturumunu transkriptten deftere al (origin observed)
+<kit>/scripts/usage.sh prices                    # hangi fiyat tablosu geçerli (pricing.json v2: model, sağlayıcı, etkin tarih)
 <kit>/scripts/usage.sh budget [slug]            # TOKEN_BUDGET_TASK'e göre kullanım (çıkış 3 uyarı, 4 aşıldı)
 <kit>/scripts/telemetry.sh summary [slug] [--json]  # koşu özeti: faz/ajan süreleri, token (ölçülen/toplam), yeniden deneme, hata, doğrulama (TELEMETRY=1 gerekir)
 <kit>/scripts/telemetry.sh archive <slug>         # kapanıştan önce: olayları work/_archive/ altına al

@@ -25,3 +25,6 @@ Bigger decisions go to `adr/`, bug classes to `known-pitfalls.md` (`incident-to-
 
 ## Writing: closeout (§8)
 `MEMORY_PROMOTE` decides: `ask` (default): `memory.sh candidates <slug>`, show the list, let the user choose with the host's question tool, then `memory.sh promote <slug> <n...|all>`. `auto`: promote all. `off`: skip. Never promote without the user under `ask`. Run `memory.sh stale` and mention any stale entries the task touched.
+
+## Task-scoped discovery notes (`scripts/knowledge.sh`)
+`knowledge.sh put <slug> <key> --files "a b"` stores a "how does X work" summary; `get` returns it only while each covered file has the same content hash (finer than `lookup-cache.sh`, which drops on any diff change). A note is the writer's claim, marked UNTRUSTED, and is refused to `verifier`, `reviewer` and `security-auditor` (`--role`): they read the code and diff themselves.

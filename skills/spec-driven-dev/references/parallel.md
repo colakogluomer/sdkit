@@ -43,3 +43,6 @@ A task that strays outside its `writes:` set is not merged (`scripts/check-write
 
 ## Limits
 `MAX_PARALLEL` in `<project-dir>/sdkit.env` (default 3) is the most subagents or `run-role.sh` processes running at once. `plan-waves.sh` enforces it when it builds waves; never start more than that, also not for read-only reviewers, unless the user raises it. Each gets a handoff brief (`handoff.md`), not the conversation.
+
+## Dispatch rules (opt-in, `scripts/dispatch.sh`)
+`PARALLEL=on` (personal `sdkit.local.env`) is required; off by default. `dispatch.sh claim <id> tasks.md` refuses a task that is already active or done, whose `after:` tasks are not done, whose `writes:` overlap an active claim, or when `MAX_PARALLEL` claims are active. `done <id>` after the merge; every recorded verifier/reviewer/auditor PASS is then stale and must be re-run on the merged diff. `release <id>` for an interrupted task. Parallel runs multiply token use: the wall-time saving is not assumed, measure it.
