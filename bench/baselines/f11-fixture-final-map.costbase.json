@@ -1,0 +1,66 @@
+{
+  "schema": "costbase/1",
+  "label": "f11-fixture-final-map",
+  "mode": "fixture",
+  "model_calls": 0,
+  "git": {
+    "head": "64418f9",
+    "dirty_files": 63
+  },
+  "fixture_sha": "3a252239be82ac1fc3cd06faf1f95a37820e5638:48bb0e917242999af29a49f850dee261e9f9402b",
+  "verdict_format": {
+    "format_only_variants": 8,
+    "accepted_first_try_without_normalization": 2,
+    "accepted_first_try_with_normalization": 8,
+    "avoidable_reruns_without": 6,
+    "avoidable_reruns_with": 0,
+    "semantic_cases": 3,
+    "wrongly_accepted_without": 0,
+    "wrongly_accepted_with": 0
+  },
+  "context": {
+    "tool_output": {
+      "full_bytes": 8914,
+      "shown_bytes": 339,
+      "failure_lines_kept_of_2": 2
+    },
+    "role_answer": {
+      "full_bytes": 4447,
+      "shown_bytes": 509
+    },
+    "unit": "characters, not tokens"
+  },
+  "tests": {
+    "full_suites": 28,
+    "small_patches": [
+      {
+        "file": "scripts/route.sh",
+        "suites": 2
+      },
+      {
+        "file": "scripts/usage.sh",
+        "suites": 3
+      },
+      {
+        "file": "scripts/parse-verdict.sh",
+        "suites": 5
+      },
+      {
+        "file": "scripts/digest.sh",
+        "suites": 2
+      },
+      {
+        "file": "docs/guide.md",
+        "suites": 0
+      }
+    ],
+    "mean_selected_suites": 2.4
+  },
+  "cost_per_accepted_task": "NOT MEASURED (needs live runs, tier T4, not authorised)",
+  "limits": [
+    "fixtures, not real traffic",
+    "bytes are not tokens",
+    "suite counts are not wall time",
+    "n = fixture count, deterministic"
+  ]
+}

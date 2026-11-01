@@ -1,0 +1,19 @@
+# Example only (not installed by init): run the cheap PR checks. The full suite and fixture benchmark belong to a release / milestone job.
+name: pr-check
+on: [pull_request]
+jobs:
+  cheap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - run: scripts/pr-check.sh --base origin/${{ github.base_ref }}
+  milestone:
+    if: startsWith(github.ref, 'refs/tags/')   # tags / releases only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - run: scripts/pr-check.sh --milestone

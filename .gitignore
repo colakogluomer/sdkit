@@ -1,0 +1,12 @@
+.DS_Store
+**/.DS_Store
+# machine-local, regenerated or personal
+bench/history.jsonl
+.sdkit/sdkit.local.env
+.sdkit/work/
+.sdkit/.sdd/
+.sdkit/.test-cache/
+*.bak
+*.tmp
+.env
+.env.*

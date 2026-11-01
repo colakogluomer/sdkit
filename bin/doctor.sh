@@ -112,7 +112,7 @@ has_codex=0; has_opencode=0; has_cursor=0; has_gemini=0
 if [ -f "$TARGET/AGENTS.md" ] || [ -d "$TARGET/.agents/skills" ]; then
   [ -f "$TARGET/AGENTS.md" ] && ok "AGENTS.md present" || bad "AGENTS.md missing"
   [ -f "$TARGET/.agents/skills/spec-driven-dev/SKILL.md" ] && ok "skills installed in .agents/skills" || bad ".agents/skills/spec-driven-dev missing (run init.sh --host <host>)"
-  for s in verify verify-core env guard plan-waves worktree resolve-base state parse-verdict check-plan-parity check-writes usage memory lookup-cache run-role; do
+  for s in verify verify-core env guard plan-waves worktree resolve-base state parse-verdict check-plan-parity check-writes usage memory lookup-cache run-role route workflow contract telemetry dod-check audit redact digest adapter dispatch knowledge recover test-select pr-check; do
     [ -x "$TARGET/$KIT_DIR/scripts/$s.sh" ] || bad "$KIT_DIR/scripts/$s.sh missing or not executable (run upgrade.sh)"
   done
   [ -x "$TARGET/$KIT_DIR/hooks/adapt.sh" ] && ok "hooks copied for the non-Claude hosts" || bad "$KIT_DIR/hooks missing (run upgrade.sh)"
