@@ -49,6 +49,7 @@ tests/memory.test.sh && tests/budget.test.sh                       # proje belle
 tests/sdkit-dir.test.sh                                            # .sdkit düzeni, eksik ayar ekleme, eski düzen, --migrate
 tests/risk-floor.test.sh                                            # risk floor (RISK_FLOOR_GLOBS): etiket tabanı, CI atlatma denemeleri
 tests/hardening.test.sh                                            # F00.5: verdict doğrulama, eşzamanlı yazım, ayar dosyası çalıştırmama, görev çözümü, önbellek, STACK
+tests/report.test.sh                                               # Value Report: görev/oturum raporu, tasarruf aritmetiği, çift sayım, tek seferlik üretim, LLM çağrısı yok
 tests/workflow.test.sh                                             # F03: profiller, geçiş tablosu, red nedenleri, sözleşme politikası, eşzamanlılık, telemetri
 tests/evidence.test.sh                                             # F04: yüksek risk kanıtı (3 rol), güven/kimlik, bayatlık, sahtecilik, eşzamanlılık, adaptör iddiaları
 tests/contract.test.sh                                             # F02: ajan sözleşmeleri (doğrulama, kayıt, hook, run-role, verifier bağımsızlığı, geriye uyum, sözleşme benchmark'ları)

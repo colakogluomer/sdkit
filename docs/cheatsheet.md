@@ -62,6 +62,7 @@ Görev: `- [ ] T3 açıklama | role: developer | size: medium | writes: yol/ | a
 ```bash
 <kit>/scripts/state.sh <slug> show              # görev durumu (work/<slug>/state.json); /clear veya çökmeden sonra buradan devam
 <kit>/scripts/usage.sh report [slug]            # rol/katman başına token + önbellek isabet oranı (USAGE_LOG=1 gerekir)
+sdkit report task|session|latest|history [--detailed|--json|--markdown]   # Value Report: kim ne yaptı, ne harcadı, neyi tasarruf etti (VALUE_REPORT=on ile görev/oturum sonunda otomatik)
 <kit>/scripts/usage.sh budget [slug]            # TOKEN_BUDGET_TASK'e göre kullanım (çıkış 3 uyarı, 4 aşıldı)
 <kit>/scripts/telemetry.sh summary [slug] [--json]  # koşu özeti: faz/ajan süreleri, token (ölçülen/toplam), yeniden deneme, hata, doğrulama (TELEMETRY=1 gerekir)
 <kit>/scripts/telemetry.sh archive <slug>         # kapanıştan önce: olayları work/_archive/ altına al
@@ -106,6 +107,7 @@ Görev: `- [ ] T3 açıklama | role: developer | size: medium | writes: yol/ | a
 | `post-edit-fmt` | stack'in biçimlendiricisi (ör. `gofmt -w`) | stack aracı yok |
 | `stop-verify` | block: kırık vet/build ile "bitti" | verify betiği yok |
 | `guard-readonly` | deny: salt okunur rolün dosya değiştirmesi | çağrıda rol yoksa kapalı |
+| `value-report` | oturum bitişinde/başlangıcında Value Report oturum özeti (engellemez, stdout yok) | `VALUE_REPORT` ≠ `on` |
 | `usage-log` | token defteri ve (`TELEMETRY=1`) `agent.end` olayı (engellemez) | `USAGE_LOG` ve `TELEMETRY` ≠ `1` |
 | `guard-budget` | ask/uyarı: `MAX_SPAWNS` veya `TOKEN_BUDGET_TASK` aşıldı | ikisi de boş |
 | `result-size` | uyarı: rol cevabı çok uzun | `SUBAGENT_RESULT_MAX_LINES` boş |

@@ -40,6 +40,14 @@ tele() {
   local t="" a=(); [ -f "$STATE" ] && t="$(jq -r '.task // empty' "$STATE" 2>/dev/null)"; [ -n "$t" ] && a=(--task "$t")
   "$TELE" emit "$@" ${a[@]+"${a[@]}"} >/dev/null 2>&1 || true
 }
+# report_final <status>: the Value Report of the task that is ending (scripts/report.sh finalize). Off unless VALUE_REPORT=on; prints on stderr, once per task,
+# and a problem in it never changes what sdd does (the report reads records; it takes no part in a decision).
+REPORT="$(dirname "${BASH_SOURCE[0]}")/report.sh"
+report_final() {
+  [ "${VALUE_REPORT:-}" = on ] && [ -x "$REPORT" ] || return 0
+  local t=""; [ -f "$STATE" ] && t="$(jq -r '.task // empty' "$STATE" 2>/dev/null)"
+  "$REPORT" finalize --status "$1" ${t:+--slug "$t"} >&2 2>&1 || true; return 0
+}
 # a refused phase move is an event too (TELE_PHASE is set while cmd_advance is checking a gate)
 REASON=""   # why the move was refused (set by reject): one word from the telemetry reasons
 die() {
@@ -219,6 +227,7 @@ cmd_advance() {
   [ -n "$att" ] && write_attestation "$att"   # after the move: a refused or lost advance never leaves a proof behind
   tele phase.enter --from "$cur" --to "$target"
   [ "$target" = done ] && tele task.end --outcome completed
+  [ "$target" = done ] && report_final completed
   if [ "$target" = done ]; then rm -f "$PROJECT_DIR/$KIT_DIR/.frozen"; rm -rf "$STATE_DIR"; echo "task closed"; else echo "phase: $target"; fi
 }
 
@@ -572,7 +581,9 @@ case "${1:-}" in
   task) get .task 2>/dev/null || true ;;
   ci-check) cmd_ci_check ;;
   fingerprint) fingerprint ;;
-  abort) [ -f "$STATE" ] && tele task.end --outcome aborted; rm -rf "$STATE_DIR"; rm -f "$PROJECT_DIR/$KIT_DIR/.frozen"; echo "task aborted" ;;
+  abort) # sdd.sh abort [failed|blocked|partial]: the task ends without finishing; the word is the terminal state the Value Report states (default: aborted)
+    case "${2:-}" in failed|blocked|partial) rst="$2" ;; *) rst=aborted ;; esac
+    [ -f "$STATE" ] && { tele task.end --outcome aborted; report_final "$rst"; }; rm -rf "$STATE_DIR"; rm -f "$PROJECT_DIR/$KIT_DIR/.frozen"; echo "task aborted" ;;
   _verdict) shift; cmd__verdict "$@" ;;
   _evidence) shift; cmd__evidence "$@" ;;
   _spawn) shift; cmd__spawn "$@" ;;

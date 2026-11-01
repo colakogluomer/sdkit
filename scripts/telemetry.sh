@@ -300,3 +300,4 @@ case "$cmd" in
     echo "archived to $KIT_DIR/work/_archive/$s.{events.jsonl,summary.json}" ;;
   *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
+    for x in routing context selection; do [ -f "$work/$s/$x.jsonl" ] && cp "$work/$s/$x.jsonl" "$work/_archive/$s.$x.jsonl"; done   # the Value Report can be rebuilt from the archive

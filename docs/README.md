@@ -33,6 +33,7 @@ Nereden başlayacağını role göre seç.
 | [design-benchmark.md](design-benchmark.md) | Görev benchmark'ı (F05-A): görev kaydı, yalıtım ve güvenlik sınırı, stratejiler, metrikler (host başına), simülasyon, rapor, F05-B önkoşulları |
 | [design-telemetry.md](design-telemetry.md) | Temel ölçüm ve telemetri (F01): olay şeması, hangi metrik güvenilir, benchmark çerçevesi, simüle sonuçlar, sınırlar, F02 önerileri |
 | [design-contracts.md](design-contracts.md) | Ajan sözleşmeleri (F02): devir/sonuç biçimi, doğrulama kategorileri, host durumu, benchmark ek yükü, geçiş, sınırlar |
+| [design-report.md](design-report.md) | Value Report: görev/oturum raporu, ölçülen ve tahmin ayrımı, tasarruf metodolojisi, tek seferlik üretim, sınırlar |
 | [design-evidence.md](design-evidence.md) | Kanıt bütünlüğü (F04): yüksek risk zorlaması, güven sınırı, geçerlilik durumları, atomiklik, host yetenek matrisi, kabul edilen sınırlar |
 | [guide.md](guide.md) | Tam rehber: her skill, agent, hook, motor, ayar, kurulum akışı, sınır |
 | [upgrading.md](upgrading.md) | Projeleri yeni kit sürümüne yükseltme, sürüme göre elle yapılacaklar |

@@ -6,6 +6,7 @@
 #   sdkit sync [--check] [dir]     refresh the kit's files in a repo (--check: only report drift) -> bin/sync.sh
 #   sdkit upgrade [--migrate [--apply]] [dir]   bring a repo up to date; --migrate moves a pre-1.0 setup into .sdkit/ -> bin/upgrade.sh
 #   sdkit install [--status|--uninstall]   register this kit on the machine for the git hooks     -> bin/install.sh
+#   sdkit report task|session|latest|history [--detailed|--json|--markdown]   the Value Report (what a task or session did, used, saved) -> scripts/report.sh
 #   sdkit version | where | help
 set -eu
 src="${BASH_SOURCE[0]}"
@@ -19,8 +20,9 @@ cmd="${1:-help}"; [ $# -gt 0 ] && shift
 
 case "$cmd" in
   init|doctor|sync|upgrade|install) exec "$BIN/$cmd.sh" "$@" ;;
+  report) exec "$ROOT/scripts/report.sh" "$@" ;;
   version|--version|-v) echo "sdkit $(jq -r .version "$ROOT/.claude-plugin/plugin.json")" ;;
   where) echo "$ROOT" ;;
-  help|--help|-h) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  help|--help|-h) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' ;;
   *) echo "sdkit: unknown command '$cmd' (try: sdkit help)" >&2; exit 2 ;;
 esac

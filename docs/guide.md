@@ -1,4 +1,7 @@
 # spec-driven-kit rehberi
+### `scripts/report.sh` (Value Report)
+Görev ve oturum değer raporu: roller/modeller, token kategorileri, API-eşdeğeri maliyet, **gözlenen** optimizasyonlar ve tasarruf (kanıt hiyerarşisi, taban kaynağı, kapsam, güven, ölçülen/tahmin ayrımı; yetersiz kanıtta "N/A — insufficient baseline data"). Yeni defter yok: `usage.sh`, `telemetry.sh`, yönlendirme/bağlam/test-seçim kayıtlarını okur; LLM çağrısı yok. `sdkit report task|session|latest|history [--detailed|--json|--markdown]`, `regenerate`. Tam tasarım, formüller ve sınırlar: [design-report.md](design-report.md).
+
 
 Bu rehber kit'in içindeki her parçayı (skill, agent, hook, script, yapılandırma) ve birbirleriyle nasıl çalıştıklarını
 anlatır. Hızlı kurulum için `README.md`, PR host'ları için `hosts.md` var.
@@ -45,7 +48,7 @@ Dört şeyi garanti etmeye çalışır:
 |---|---|---|
 | **Skill** | 4 | Görevi yürüten talimat setleri: `spec-driven-dev` (ana akış, `references/` ile kademeli yüklenir), `incident-to-rule`, `scaffold-init`, `scaffold-doctor` |
 | **Rol** | 10 | `core/roles/` altında araçtan bağımsız tanımlar: `orchestrator`, `analyst`, `scout`, `engineer`, `developer`, `test-writer`, `devsecops`, `reviewer`, `security-auditor`, `verifier`. Dokuzu subagent olarak üretilir; `verifier`'ın `deep: strong` ile strong katmanlı ikizi `verifier-deep` de üretilir, yani host başına **10 rol dosyası** |
-| **Hook** | 17 + 1 | Claude Code'da araç adımları sırasında otomatik çalışan 17 kontrol (`guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract` dahil) ve diğer host'ların aynı hook'ları çağırdığı `adapt.sh` kabuğu. Hook olmayan yerde git hook'ları aynı kuralların çoğunu uygular |
+| **Hook** | 18 + 1 | Claude Code'da araç adımları sırasında otomatik çalışan 18 kontrol (`guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract` dahil) ve diğer host'ların aynı hook'ları çağırdığı `adapt.sh` kabuğu. Hook olmayan yerde git hook'ları aynı kuralların çoğunu uygular |
 | **Doğrulama motoru** | 1 çekirdek + stack başına adımlar | `scripts/verify-core.sh` (diff tabanı, değişen dosyalar, `verify.d`, yeşil-sonuç önbelleği) + `stacks/<stack>/scripts/steps.sh` (stack'in kendi kontrolleri) |
 | **Stack** | 7 | `go`, `spring-boot` ve `jvm` (Maven/Gradle), `python`, `nextjs`, `react-native` (son ikisi `stacks/_node/` yardımcısını paylaşır) ve algılama başarısızsa `generic`. Sözleşme: `stacks/README.md` |
 | **Script** | 20 | `sdd.sh`, `resolve-base.sh`, `open-pr.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `check-plan-parity.sh`, `check-writes.sh`, `usage.sh`, `telemetry.sh`, `contract.sh`, `workflow.sh`, `route.sh`, `memory.sh`, `lookup-cache.sh`, `run-role.sh` + `verify-core.sh` ve `verify-lib.sh` (motor; doğrudan çalıştırılmaz) |
@@ -375,6 +378,7 @@ Hook'lar aslen **Claude Code'a özgüdür**. Gemini ve Cursor aynı hook script'
 | `guard-readonly.sh` | PreToolUse: Bash, Edit, Write, NotebookEdit | **deny** | Salt okunur bir rolün (reviewer, verifier ...) dosya değiştirmesini engeller (bölüm 6) | `agent_type` (hook girdisi) | `agent_type` yoksa |
 | `post-edit-fmt.sh` | PostToolUse: Edit, Write | yok | Yazılan dosyayı stack'in `fmt.sh`'ı ile biçimlendirir (Go: `gofmt`) | `STACK` | Formatlayıcı kurulu değilse no-op |
 | `stop-verify.sh` | Stop | **block** | Commit'siz değişiklikler stack'in hızlı kontrolünde (`--fast`) kırıksa "bitti" demeyi engeller | `VERIFY_CMD` | Verify betiği bulunamazsa |
+| `value-report.sh` | SessionEnd, SessionStart | yok | Value Report oturum düzeyi (`scripts/report.sh`): `SessionEnd`'te oturumu bitmiş işaretler ve özetini saklar; `SessionStart`'ta bitiş sinyali almadan kesilmiş eski oturumları `interrupted` olarak kurtarır. Stdout'a yazmaz, engellemez. `VALUE_REPORT` ≠ `on` ise sessiz. Ayrıntı [design-report.md](design-report.md) |
 | `usage-log.sh` | Stop, SubagentStop | yok | Transkriptten token kullanımını `usage.sh` defterine, `TELEMETRY=1` ile ayrıca `agent.end` olayı olarak (token, araç çağrısı sayısı, tahmini süre) yazar (bölüm 18) | `USAGE_LOG=1` veya `TELEMETRY=1` | ikisi de 1 değilse |
 | `guard-budget.sh` | PreToolUse: Agent | **ask** (strict) / uyarı (guided) | Her subagent açılışını sayar (`state.sh spawn`) ve görev token bütçesini denetler (`usage.sh budget`); sınır aşılınca sorar (bölüm 18) | `MAX_SPAWNS`, `TOKEN_BUDGET_TASK` | İkisi de boşsa, `SDD_MODE=off`, aktif görev yoksa |
 | `result-size.sh` | SubagentStop | yok | Rolün son cevabı `SUBAGENT_RESULT_MAX_LINES` satırdan uzunsa uyarır (engellemez) | `SUBAGENT_RESULT_MAX_LINES` | Boşsa |
@@ -590,6 +594,8 @@ Doğrudan çalıştırılmaz; stack'in `verify.sh`'ı yükler (bölüm 8). `veri
 | `NODE_PM` | boş | Node stack'leri: `npm\|pnpm\|yarn\|bun`; boşsa lockfile'dan |
 | `VERIFY_BUILD` | boş | Node stack'leri: tam doğrulamada `next build` vb. çalıştırılsın mı |
 | `JAVA_BUILD_TOOL` | boş | Spring Boot: `maven\|gradle` (algılama yanlışsa) |
+| `VALUE_REPORT` **(kişisel)** | `on` | `on` ise görev bittiğinde (`sdd.sh advance done`, `abort`) kompakt Value Report stderr'e yazılır ve `work/_reports/`'a saklanır; oturum bitişinde özet saklanır. Okuma-yalnız, LLM çağrısı yok. Boş = otomatik kapalı (komutlar yine çalışır). [design-report.md](design-report.md) |
+| `REPORT_BASELINE_MODEL` | boş | Value Report yönlendirme karşı-olgusunun taban modeli (`pricing.json`'daki kimlik). Boşsa yönlendirme tasarrufu `N/A`; kit model uydurmaz |
 | `USAGE_LOG` **(kişisel)** | `1` | `1` ise token defteri açılır (bölüm 18); boş = kapalı |
 | `TELEMETRY` **(kişisel)** | boş | `1` ise `work/<slug>/events.jsonl` olay günlüğü açılır (bölüm 18, [design-telemetry.md](design-telemetry.md)); boş = kapalı |
 | `EXTRA_REVIEW_SKILLS` | boş | `high` riskte reviewer + security-auditor'a ek host skill'leri, boşlukla ayrılmış (ör. `code-review security-review`) |
