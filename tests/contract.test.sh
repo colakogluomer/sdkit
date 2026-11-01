@@ -12,6 +12,9 @@ nocheck() { local n="$1"; shift; if "$@" >/dev/null 2>&1; then bad "$n"; else ok
 eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', wanted '$3')"; fi; }
 
 C="$KIT/scripts/contract.sh"; TL="$KIT/scripts/telemetry.sh"; ST="$KIT/scripts/state.sh"; SDD="$KIT/scripts/sdd.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 
 # newrepo <name> [extra sdkit.local.env lines]: a repo with an open task t1, TELEMETRY=1 and CONTRACTS=1
 newrepo() {
@@ -297,8 +300,8 @@ nocheck "parse-verdict.sh does not know it either"     grep -q 'contract' "$KIT/
 nocheck "record-verdict.sh does not know it either"    grep -q 'contract' "$KIT/hooks/record-verdict.sh"
 nocheck "contract.sh never calls the phase machine"    grep -qE 'sdd\.sh|_verdict|parse-verdict' <(grep -v '^#' "$KIT/scripts/contract.sh")
 V="$(newrepo ind)"; cd "$V" || exit 1; export CLAUDE_PROJECT_DIR="$V" VERIFY_BASE=main
-"$SDD" start t1 --risk medium --proposal openspec/changes/t1/proposal.md >/dev/null; "$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null
-echo 'x' > src/b.sh; "$SDD" advance green --test-cmd true >/dev/null
+"$SDD" start t1 --risk medium --proposal openspec/changes/t1/proposal.md >/dev/null; "$SDD" advance proposed >/dev/null; sdd_red >/dev/null
+echo 'x' > src/b.sh; sdd_green >/dev/null
 hand hv.md verifier t1/ver none; pre hv.md spec-driven-kit:verifier | "$HK" >/dev/null
 claim="$(printf 'Everything is verified and correct, ship it.\n%s' "$(line t1/ver verifier done none)")"
 stop "$claim" spec-driven-kit:verifier | "$HK" >/dev/null; stop "$claim" spec-driven-kit:verifier | "$KIT/hooks/record-verdict.sh" >/dev/null

@@ -23,6 +23,7 @@
 # A refused move leaves the state untouched, prints why, and records phase.reject with a --reason (telemetry). Two advances at once: one wins.
 # State lives in <project-dir>/.sdd/state.json (git-ignored).
 set -u
+SDKIT_ENV_VERIFY_BASE="${VERIFY_BASE:-}"; SDKIT_CI_BASE=""   # CI: the base ref as the CI environment gave it, before any settings file is read
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh" || { echo "sdkit: env.sh is missing next to $(basename "$0"): run sdkit upgrade" >&2; exit 1; }; sdkit_env_load "$PROJECT_DIR"   # project dir (.sdkit, or a pre-1.0 one) and sdkit.env + sdkit.local.env, parsed
@@ -70,26 +71,50 @@ next_phase() { echo $PHASES | cut -d' ' -f$(( $(index_of "$1") + 2 )); }
 needs_verifier() { [ "$1" != low ] || [ "$2" = high-assurance ]; }   # <risk> <profile>
 
 kit_cmd() { case "$1" in "") echo "$PLUGIN_ROOT/$2" ;; /*) echo "$1" ;; *) echo "$PROJECT_DIR/$1" ;; esac; }
-diff_base() { (cd "$PROJECT_DIR" && "$(kit_cmd "${DIFF_BASE_CMD:-}" scripts/resolve-base.sh)" 2>/dev/null); }
+diff_base() {  # CI: the base the job gave; otherwise DIFF_BASE_CMD, or resolve-base.sh next to this script
+  [ -n "$SDKIT_CI_BASE" ] && { echo "$SDKIT_CI_BASE"; return; }
+  local r b; if [ -n "${DIFF_BASE_CMD:-}" ]; then r="$(kit_cmd "$DIFF_BASE_CMD" "")"; else r="$(dirname "${BASH_SOURCE[0]}")/resolve-base.sh"; fi
+  b="$(cd "$PROJECT_DIR" && "$r" 2>/dev/null)"; echo "${b:-${VERIFY_BASE:-}}"
+}
 
 # Files that differ from where this branch left the diff base (tracked or not). The base moving on does not change the list.
 # The workflow state and the attestations are not part of the change they describe.
-changed_files() {
-  local base mb; base="$(diff_base)"
+# NUL-separated, so no file name is ever quoted or split. Returns non-zero when git cannot answer (unknown base, shallow clone): callers fail closed.
+changed_files_z() (
+  set -o pipefail
+  base="$(diff_base)"
   cd "$PROJECT_DIR" || exit 1
-  mb="$(git merge-base "$base" HEAD 2>/dev/null || echo "$base")"
-  { git diff --name-only "$mb" -- . ":!$KIT_DIR/.sdd" ":!$KIT_DIR/attestations" 2>/dev/null
-    git ls-files -o --exclude-standard -- . ":!$KIT_DIR/.sdd" ":!$KIT_DIR/attestations"; } | sort -u
+  git rev-parse -q --verify "$base^{commit}" >/dev/null || exit 1
+  mb="$(git merge-base "$base" HEAD 2>/dev/null)" || mb="$base"
+  { git diff -z --name-only --no-renames "$mb" -- . ":!$KIT_DIR/.sdd" ":!$KIT_DIR/attestations" || exit 1
+    git ls-files -z -o --exclude-standard -- . ":!$KIT_DIR/.sdd" ":!$KIT_DIR/attestations" || exit 1; } | sort -z -u
+)
+changed_files() ( set -o pipefail; changed_files_z | tr '\0' '\n' )
+
+# fp_entry <path>: what the fingerprint records for one changed path: "<mode> <object id>", or "deleted"
+fp_entry() {
+  local f="$1" id
+  if [ -L "$f" ]; then id="$(printf '%s' "$(readlink "$f")" | git hash-object --stdin)" && printf '120000 %s' "$id"
+  elif [ -d "$f" ]; then   # a submodule (gitlink): its checked-out commit, or the recorded one when it is not checked out (CI)
+    if [ -e "$f/.git" ]; then id="$(git -C "$f" rev-parse -q --verify HEAD)"; else id="$(git ls-files -s -- "$f" | awk '$1 == "160000" {print $2; exit}')"; fi
+    [ -n "$id" ] && printf '160000 %s' "$id"
+  elif [ -f "$f" ]; then id="$(git hash-object -- "$f")" && if [ -x "$f" ]; then printf '100755 %s' "$id"; else printf '100644 %s' "$id"; fi
+  elif [ -e "$f" ]; then return 1
+  else printf deleted; fi
 }
 
-# Hash of every changed file's content. Stable across commit and rebase onto a moved base; changes on any further edit.
-fingerprint() {
+# Hash of every changed path's mode and content. Stable across commit and rebase onto a moved base; changes on any further edit, chmod or submodule bump.
+# Prints nothing and returns 1 when the diff cannot be listed or hashed: an empty fingerprint never matches anything.
+fingerprint() (
+  set -o pipefail
   cd "$PROJECT_DIR" || exit 1
-  changed_files |
-    while IFS= read -r f; do
-      if [ -f "$f" ]; then printf '%s %s\n' "$f" "$(git hash-object -- "$f")"; else printf '%s deleted\n' "$f"; fi
-    done | shasum -a 256 | cut -d' ' -f1
-}
+  list="$(mktemp)" || exit 1; trap 'rm -f "$list"' EXIT
+  changed_files_z > "$list" || { echo "sdd: cannot list the changes against '$(diff_base)' (unknown ref? fetch it; CI needs the full history)" >&2; exit 1; }
+  while IFS= read -r -d '' f; do
+    e="$(fp_entry "$f")" || { echo "sdd: cannot fingerprint '$f'" >&2; exit 1; }
+    printf '%s\0%s\n' "$f" "$e"
+  done < "$list" | sdkit_sha256 || { echo "sdd: cannot hash the diff (needs shasum, sha256sum or openssl)" >&2; exit 1; }
+)
 
 has_dod() {  # a "Definition of Done" heading followed by at least one list item
   awk '{l=tolower($0)} l ~ /^#+[ \t]+.*definition of done/{on=1; next} on && /^#+[ \t]/{exit} on && /^[ \t]*([-*]|[0-9]+\.)[ \t]+[^ \t]/{found=1} END{exit !found}' "$1"
@@ -100,6 +125,7 @@ cmd_start() {
   local slug="${1:-}" risk="" proposal="" why profile=standard; shift || true
   while [ $# -gt 0 ]; do case "$1" in --risk) risk="$2"; shift ;; --proposal) proposal="$2"; shift ;; --profile) profile="$2"; shift ;; *) die "unknown option $1" ;; esac; shift; done
   [ -n "$slug" ] || die "usage: start <slug> --risk <low|medium|high> --proposal <path>"
+  case "$slug" in .*|*[!A-Za-z0-9._-]*) die "slug '$slug' may only use letters, digits, '.', '_' and '-', and may not start with '.'" ;; esac
   case "$risk" in low|medium|high) ;; *) die "--risk must be low, medium or high (the user-confirmed label)" ;; esac
   [ -n "$proposal" ] || die "--proposal <path to the proposal.md that will hold the Definition of Done> is required"
   case " $PROFILES " in *" $profile "*) ;; *) die "--profile must be one of: $PROFILES" ;; esac
@@ -187,7 +213,9 @@ cmd_advance() {
       run_test_cmd "$test_cmd" && reject tests-pass "the tests PASS, so they prove nothing yet. They must fail for the right reason first (see $KIT_DIR/.sdd/last-test.log)."
       xf='.testCmd=$x'; xa=(--arg x "$test_cmd") ;;   # written with the move below, never before it
     green)
-      test_cmd="${test_cmd:-$(get .testCmd)}"
+      local red_cmd; red_cmd="$(get .testCmd)"
+      [ -z "$test_cmd" ] || [ -z "$red_cmd" ] || [ "$test_cmd" = "$red_cmd" ] || reject test-cmd-changed "GREEN re-runs the command that failed at RED ('$red_cmd'); a different command proves nothing about those tests. Run 'sdd.sh advance green' without --test-cmd."
+      test_cmd="${red_cmd:-$test_cmd}"
       [ -n "$test_cmd" ] || reject no-artifact "--test-cmd is required"
       wf_gate green "$profile"
       run_test_cmd "$test_cmd" || { tail -20 "$STATE_DIR/last-test.log" >&2; reject tests-fail "the tests still fail (full output: $KIT_DIR/.sdd/last-test.log)"; }
@@ -196,7 +224,7 @@ cmd_advance() {
       enforce_floor "$risk"
       [ -f "$PROJECT_DIR/$(get .proposal)" ] || reject no-artifact "proposal not found: $(get .proposal) (it was there at 'proposed')"
       wf_gate verified "$profile"
-      local fp; fp="$(fingerprint)"
+      local fp; fp="$(fingerprint)" || reject no-fingerprint "cannot fingerprint the diff (see the message above)"
       if ! needs_verifier "$risk" "$profile"; then
         local verify; verify="$(kit_cmd "${VERIFY_CMD:-}" "stacks/$STACK/scripts/verify.sh")"
         if [ -x "$verify" ]; then
@@ -258,7 +286,8 @@ cmd__spawn() {
   local role src=hook run=""; role="$(ev_role "${1:-}")" || exit 0; shift
   while [ $# -gt 0 ]; do case "$1" in --source) src="$2"; shift ;; --run) run="$2"; shift ;; esac; shift; done
   [ -f "$STATE" ] || exit 0
-  put --arg r "$role" --arg s "$src" --arg run "$run" --arg fp "$(fingerprint)" --arg now "$(date -u +%FT%TZ)" \
+  local fp; fp="$(fingerprint)" || exit 1
+  put --arg r "$role" --arg s "$src" --arg run "$run" --arg fp "$fp" --arg now "$(date -u +%FT%TZ)" \
     '.spawns = (((.spawns // []) + [{role:$r,source:$s,run:$run,fp:$fp,at:$now}]) | .[-16:])'
 }
 
@@ -288,7 +317,7 @@ cmd__evidence() {
   result="${2:-}"; case "$result" in PASS|BLOCK) ;; *) die "verdict must be PASS or BLOCK" ;; esac; shift 2
   while [ $# -gt 0 ]; do case "$1" in --source) src="$2"; shift ;; --run) run="$2"; shift ;; --task) task="$2"; shift ;; *) die "unknown option $1" ;; esac; shift; done
   case "$src" in manual|hook|run-role) ;; *) die "--source must be manual, hook or run-role" ;; esac
-  n="$$-$RANDOM-$(date +%s)"; fp="$(fingerprint)"
+  n="$$-$RANDOM-$(date +%s)"; fp="$(fingerprint)" || die "cannot fingerprint the diff, nothing recorded"
   put --arg role "$role" --arg result "$result" --arg src "$src" --arg run "$run" --arg task "$task" --arg n "$n" --arg fp "$fp" --arg now "$(date -u +%FT%TZ)" '
     def logit($acc; $reason; $trust): .evidenceLog = (((.evidenceLog // []) + [{n:$n,role:$role,result:$result,run:$run,source:$src,trust:$trust,fp:$fp,at:$now,accepted:$acc,reason:$reason}]) | .[-40:]);
     def drop($gone): .spawns = [(.spawns // [])[] | select(. as $x | ($gone | index($x)) == null)];
@@ -455,16 +484,6 @@ floor_hit() {  # <globs> <file>: does any entry match the file (at any level)?
   return 1
 }
 
-# The base branch's committed settings count in CI: a pull request that deletes or loosens RISK_FLOOR_GLOBS, or sets SDD_MODE=off, in its own
-# sdkit.env is still held to what the base says. base_setting <KEY> prints that value; exit 1 when the base has no settings file (first adoption).
-base_setting() {
-  local base tmp rc=1; base="$(diff_base)"; tmp="$(mktemp)"
-  if (cd "$PROJECT_DIR" && git show "$base:$KIT_DIR/$KIT_ENV") > "$tmp" 2>/dev/null; then
-    ( eval "$1="; SDKIT_ENV_QUIET=1; sdkit_env_load_file "$tmp"; eval "printf '%s' \"\${$1:-}\"" ); rc=0
-  fi
-  rm -f "$tmp"; return $rc
-}
-
 # enforce_floor <task risk>: strict refuses, guided warns, off does nothing
 enforce_floor() {
   [ -n "${RISK_FLOOR_GLOBS:-}" ] && [ "$SDD_MODE" != off ] || return 0
@@ -488,7 +507,8 @@ cmd_gate() {
   local kind="${1:-}" phase; phase="$([ -f "$STATE" ] && get .phase)"
   case "$kind" in
     edit)
-      local rel="${2:-}"; rel="${rel#"$PROJECT_DIR"/}"
+      [ -n "${2:-}" ] || exit 0
+      local rel; rel="$(sdkit_relpath "$PROJECT_DIR" "$2")"   # docs/../src/x and .sdkit/./.sdd/x are judged as what they really are
       [ -n "$rel" ] || exit 0
       case "$rel" in "$KIT_DIR"/.sdd/*|"$KIT_DIR"/attestations/*) echo "The workflow state and attestations are written only by sdd.sh and the verifier hook."; exit 1 ;; esac
       matches_glob_list "$rel" "$KIT_DIR/*,openspec/*,docs/*,*.md,${SDD_FREE_GLOBS:-}" && exit 0
@@ -513,27 +533,49 @@ cmd_gate() {
 # docs/specs/project files needs a committed attestation for exactly this diff; medium and high also need a verifier PASS.
 # With RISK_FLOOR_GLOBS the attestation's risk must also reach the floor of the files the diff really touches (recomputed here, never
 # read from the attestation), and a file that matches a floor entry needs an attestation even where it would otherwise be free.
-cmd_ci_check() {
-  local gated="" f why base_globs all_globs res lvl="low" lfile="" base_mode
-  if [ "$SDD_MODE" = off ]; then   # a pull request cannot switch the gate off for itself when the base branch has it on
-    base_mode="$(base_setting SDD_MODE)" || base_mode=off
-    [ "${base_mode:-strict}" = off ] && { echo "sdd ci-check: SDD_MODE=off, skipped"; return 0; }
-    echo "sdd ci-check: SDD_MODE=off in this branch, but the base branch has it on: checking anyway"
+# ci_settings_from_base <base>: every setting comes from the base branch's committed settings file, so a pull request cannot loosen the gate
+# that judges it (SDD_FREE_GLOBS=*, SDD_MODE=off, DIFF_BASE_CMD=...). Without one on the base (first adoption) this branch's settings stay.
+ci_settings_from_base() {
+  local tmp key; tmp="$(mktemp)"
+  if ! (cd "$PROJECT_DIR" && git show "$1:$KIT_DIR/$KIT_ENV") > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; echo "sdd ci-check: the base branch has no $KIT_DIR/$KIT_ENV yet (first adoption): using this branch's settings"; return 0
   fi
-  base_globs="$(base_setting RISK_FLOOR_GLOBS)" || base_globs=""
-  why="$(floor_validate "${RISK_FLOOR_GLOBS:-}")" || { echo "sdd ci-check: FAIL RISK_FLOOR_GLOBS is invalid: $why"; return 1; }
-  why="$(floor_validate "$base_globs")" || { echo "sdd ci-check: FAIL RISK_FLOOR_GLOBS on the base branch is invalid: $why"; return 1; }
-  all_globs="${RISK_FLOOR_GLOBS:+$RISK_FLOOR_GLOBS,}$base_globs"
+  for key in $(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p; s/^[[:space:]]*:[[:space:]]+"?\$\{([A-Za-z_][A-Za-z0-9_]*):=.*/\1/p' \
+               "$PROJECT_DIR/$KIT_DIR/$KIT_ENV" "$PROJECT_DIR/$KIT_DIR/sdkit.local.env" 2>/dev/null | sort -u); do
+    _sdkit_env_refused "$key" || unset "$key"
+  done
+  SDKIT_ENV_QUIET=1 sdkit_env_load_file "$tmp"; rm -f "$tmp"
+  STACK="${STACK:-$SDKIT_DEFAULT_STACK}"; SDD_MODE="${SDD_MODE:-strict}"
+}
+
+# Server-side check (run it in CI on the PR branch, with VERIFY_BASE=origin/<target branch> set by the CI job): every change that is not only
+# docs/specs/project files needs a committed attestation for exactly this diff; medium and high also need a verifier PASS.
+# Settings come from the base branch (ci_settings_from_base); DIFF_BASE_CMD is never run here. It fails closed: an unknown base, a diff that
+# cannot be listed or hashed, or an attestation without a real fingerprint never passes. With RISK_FLOOR_GLOBS (the base's, plus any this
+# branch adds) the attestation's risk must reach the floor of the files the diff really touches.
+# The attestation itself is a file the author commits: this proves the flow was run for this diff, not who ran it. Review it like code.
+cmd_ci_check() {
+  local gated="" f why all_globs res lvl="low" lfile="" head_globs="${RISK_FLOOR_GLOBS:-}" files
+  [ -n "$SDKIT_ENV_VERIFY_BASE" ] || { echo "sdd ci-check: FAIL VERIFY_BASE=origin/<target branch> must come from the CI job's environment"; return 1; }
+  SDKIT_CI_BASE="$SDKIT_ENV_VERIFY_BASE"
+  (cd "$PROJECT_DIR" && git rev-parse -q --verify "$SDKIT_CI_BASE^{commit}" >/dev/null) || {
+    echo "sdd ci-check: FAIL base '$SDKIT_CI_BASE' is not a known commit (fetch the target branch; the checkout needs the full history)"; return 1; }
+  ci_settings_from_base "$SDKIT_CI_BASE"
+  [ "$SDD_MODE" = off ] && { echo "sdd ci-check: SDD_MODE=off on the base branch, skipped"; return 0; }
+  why="$(floor_validate "$head_globs")" || { echo "sdd ci-check: FAIL RISK_FLOOR_GLOBS in this branch is invalid: $why"; return 1; }
+  why="$(floor_validate "${RISK_FLOOR_GLOBS:-}")" || { echo "sdd ci-check: FAIL RISK_FLOOR_GLOBS on the base branch is invalid: $why"; return 1; }
+  all_globs="${RISK_FLOOR_GLOBS:-}"; [ -n "$head_globs" ] && all_globs="$head_globs${all_globs:+,$all_globs}"
   if [ -n "$all_globs" ]; then res="$(floor_of "$all_globs")"; lvl="${res%% *}"; lfile="${res#* }"; fi
+  files="$(changed_files)" || { echo "sdd ci-check: FAIL cannot list the changes against $SDKIT_CI_BASE"; return 1; }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     matches_glob_list "$f" "$KIT_DIR/*,openspec/*,docs/*,*.md,${SDD_FREE_GLOBS:-}" && ! floor_hit "$all_globs" "$f" || gated="$gated $f"
-  done < <(changed_files)
-  [ -n "$gated" ] || { echo "sdd ci-check: no code changes against $(diff_base), nothing to attest"; return 0; }
-  local fp a r v miss reason=""; fp="$(fingerprint)"
+  done <<< "$files"
+  [ -n "$gated" ] || { echo "sdd ci-check: no code changes against $SDKIT_CI_BASE, nothing to attest"; return 0; }
+  local fp a r v miss reason=""; fp="$(fingerprint)" || { echo "sdd ci-check: FAIL cannot fingerprint the diff"; return 1; }
   for a in "$PROJECT_DIR/$KIT_DIR"/attestations/*.json; do
     [ -f "$a" ] || continue
-    [ "$(jq -r .fingerprint "$a")" = "$fp" ] || continue
+    [ "$(jq -r '.fingerprint // ""' "$a" 2>/dev/null)" = "$fp" ] || continue   # fp is 64 hex characters, so an empty or broken one never matches
     r="$(jq -r '.risk // "low"' "$a")"; v="$(jq -r '.verdict // ""' "$a")"
     if [ "$(risk_rank "$r")" -lt "$(risk_rank "$lvl")" ]; then
       reason="$(basename "$a"): risk $r is below the risk floor $lvl set by '$lfile' (RISK_FLOOR_GLOBS)"; continue

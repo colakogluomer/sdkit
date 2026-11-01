@@ -15,6 +15,9 @@ printf 'BASE_BRANCH=main\nSTACK=generic\n' > .agentkit/project.env   # SDD_MODE 
 echo base > README.md && git add -A && git commit -qm base && git checkout -qb feat
 export CLAUDE_PROJECT_DIR="$T" VERIFY_BASE=main
 SDD="$KIT/scripts/sdd.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 
 hook() {  # hook <script> <json>  -> prints the permission decision, or "allow" when the hook stayed silent
   local out; out="$(printf '%s' "$2" | "$KIT/hooks/$1")"
@@ -39,7 +42,7 @@ expect "start"                   "$SDD" start t1 --risk medium --proposal opensp
 is "code edit denied in intake"  deny  "$(hook guard-phase.sh "$(edit src/app.go)")"
 refuse "no DoD, no proposed"     "$SDD" advance proposed
 printf '# P\n## Definition of Done\n- returns 200 on valid input\n' > openspec/changes/x/proposal.md
-refuse "cannot skip to red"      "$SDD" advance red --test-cmd false
+refuse "cannot skip to red"      sdd_red
 expect "advance proposed"        "$SDD" advance proposed
 
 echo "proposed = test-first"
@@ -47,11 +50,11 @@ is "src edit denied"             deny  "$(hook guard-phase.sh "$(edit src/app.go
 is "test edit allowed"           allow "$(hook guard-phase.sh "$(edit src/app_test.go)")"
 is "tests/ dir allowed"          allow "$(hook guard-phase.sh "$(edit tests/it.py)")"
 refuse "passing tests are not RED" "$SDD" advance red --test-cmd true
-expect "failing tests are RED"   "$SDD" advance red --test-cmd false
+expect "failing tests are RED"   sdd_red
 is "src edit allowed in red"     allow "$(hook guard-phase.sh "$(edit src/app.go)")"
-refuse "still failing, no green" "$SDD" advance green --test-cmd false
+refuse "still failing, no green" "$SDD" advance green
 echo 'package src' > src/app.go
-expect "green"                   "$SDD" advance green --test-cmd true
+expect "green"                   sdd_green
 
 echo "verification (medium needs an independent verdict)"
 refuse "no verdict, no verified" "$SDD" advance verified
@@ -102,7 +105,7 @@ git reset -q src/app.go; git checkout -q src/app.go 2>/dev/null
 echo "parse-verdict --record (hosts without SubagentStop)"
 printf '# P\n## Definition of Done\n- D1: x | Verified by: unit test\n' > openspec/changes/x/proposal.md
 "$SDD" start t3 --risk medium --proposal openspec/changes/x/proposal.md >/dev/null
-"$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null; "$SDD" advance green --test-cmd true >/dev/null
+"$SDD" advance proposed >/dev/null; sdd_red >/dev/null; sdd_green >/dev/null
 cat > "$T/v.txt" <<'X'
 DOD
 - D1 x | PASS | t_test.go:1
@@ -137,7 +140,7 @@ rm -f docs-note.md; git checkout -q feat; git stash pop -q 2>/dev/null; git bran
 echo "low risk and modes"
 printf '# P\n## Definition of Done\n1. it works\n' > openspec/changes/x/proposal.md
 "$SDD" start t2 --risk low --proposal openspec/changes/x/proposal.md >/dev/null
-"$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null; "$SDD" advance green --test-cmd true >/dev/null
+"$SDD" advance proposed >/dev/null; sdd_red >/dev/null; sdd_green >/dev/null
 expect "low verifies without a verdict" "$SDD" advance verified
 "$SDD" abort >/dev/null
 echo SDD_MODE=guided >> .agentkit/project.env

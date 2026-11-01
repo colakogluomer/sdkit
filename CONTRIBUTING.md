@@ -64,6 +64,7 @@ tests/knowledge.test.sh                                            # F16: conten
 tests/trace.test.sh                                                # F17: trace (content-free)
 tests/recover.test.sh                                              # F18: recovery, idempotent
 tests/security.test.sh                                             # F19: redaction, audit chain, static policy
+tests/gate-security.test.sh                                        # review findings: trusted CI gate, fail-closed fingerprint, RED/GREEN binding, path normalisation, guard-pr bypasses
 tests/ci.test.sh                                                   # F20: cheap PR check, regression history
 tests/evidence.test.sh                                             # F04: high-risk evidence (3 roles), trust/identity, staleness, forgery, concurrency, adapter claims
 tests/contract.test.sh                                             # F02: agent contracts (validation, recording, hook, run-role, verifier independence, backward compatibility, contract benchmarks)

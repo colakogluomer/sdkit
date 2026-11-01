@@ -16,6 +16,9 @@ eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', wanted '$3')"; 
 ksum() { (cd "$KIT" && git status --porcelain -- bench >/dev/null 2>&1; find bench -type f ! -name .DS_Store | sort | xargs shasum | shasum | cut -d' ' -f1); }
 BENCH0="$(ksum)"
 RT="$KIT/scripts/route.sh"; SDD="$KIT/scripts/sdd.sh"; RR="$KIT/scripts/run-role.sh"; US="$KIT/scripts/usage.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 export VERIFY_BASE=main SDKIT_ROUTE_NO_SLEEP=1
 
 # a repo: newrepo <name> [sdkit.env line]...   (settings go to sdkit.env; budgets to sdkit.local.env via local)
@@ -34,7 +37,7 @@ newrepo() {
 use() { cd "$1" || exit 1; export CLAUDE_PROJECT_DIR="$1"; R="$1"; ST="$1/.sdkit/.sdd/state.json"; LED="$1/.sdkit/work/_misc/routing.jsonl"; }
 local_env() { printf '%s\n' "$@" >> "$R/.sdkit/sdkit.local.env"; }
 green() { "$KIT/scripts/state.sh" t1 init "$1" feat >/dev/null; "$SDD" start t1 --risk "$1" ${2:+--profile "$2"} --proposal openspec/changes/t1/proposal.md >/dev/null && "$SDD" advance proposed >/dev/null \
-    && "$SDD" advance red --test-cmd false >/dev/null && echo "x$RANDOM" >> src/a.sh && "$SDD" advance green --test-cmd true >/dev/null; }
+    && sdd_red >/dev/null && echo "x$RANDOM" >> src/a.sh && sdd_green >/dev/null; }
 # j <field> <command...>: one field of a decision
 j() { local f="$1"; shift; "$@" 2>/dev/null | jq -r "$f"; }
 dec() { "$RT" decide --json "$@"; }

@@ -180,6 +180,10 @@ expect "install.sh --uninstall" 0 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.
 expect "install.sh --status fails when unregistered" 1 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.sh" --status
 ci="$tmp/ci-repo"; mkdir -p "$ci"; git -C "$ci" init -q -b main; printf 'module x' > "$ci/go.mod"
 expect "init --ci bitbucket" 0 bash -c "'$ROOT/bin/init.sh' --ci bitbucket '$ci' >/dev/null && grep -qE 'sdd[.]sh.? ci-check' '$ci/bitbucket-pipelines.yml' && test -x '$ci/.sdkit/scripts/sdd.sh'"
+ci_gl="$tmp/ci-gl"; mkdir -p "$ci_gl"; git -C "$ci_gl" init -q -b main; printf 'module x' > "$ci_gl/go.mod"
+expect "init --ci gitlab" 0 bash -c "'$ROOT/bin/init.sh' --ci gitlab '$ci_gl' >/dev/null && grep -qE 'sdd[.]sh.? ci-check' '$ci_gl/.gitlab-ci.yml' && grep -q 'CI_MERGE_REQUEST_TARGET_BRANCH_NAME' '$ci_gl/.gitlab-ci.yml' && ! grep -q '__KIT_DIR__' '$ci_gl/.gitlab-ci.yml'"
+expect "the CI gate's env.sh is not git-ignored" 1 git -C "$ci_gl" check-ignore -q .sdkit/scripts/env.sh
+expect "doctor sees the GitLab CI gate" 0 bash -c "'$ROOT/bin/doctor.sh' '$ci_gl' 2>&1 | grep -q 'CI runs the spec-driven gate'"
 expect "init --ci rejects unknown hosts" 2 "$ROOT/bin/init.sh" --ci svn "$ci"
 expect "sync --check is clean after init" 0 "$ROOT/bin/sync.sh" --check "$ci"
 echo "# local edit" >> "$ci/.sdkit/scripts/sdd.sh"
@@ -223,6 +227,25 @@ expect "sdkit works through a symlink (package managers)" 0 bash -c "test \"\$('
 expect "sdkit init dispatches to init.sh" 0 bash -c "'$ROOT/bin/sdkit' init --stack go --host claude '$tmp/sk-init' 2>&1 | grep -q 'host=claude' || (mkdir -p '$tmp/sk-init' && git -C '$tmp/sk-init' init -q -b main && '$ROOT/bin/sdkit' init --stack go '$tmp/sk-init' 2>&1 | grep -q 'stack=go')"
 expect "init all hosts" 0 bash -c "'$ROOT/bin/init.sh' --host claude,codex,opencode,cursor,gemini --stack go '$tmp/init-go' >/dev/null && test -f '$tmp/init-go/.opencode/plugins/spec-driven-kit-guard.js' && test -f '$tmp/init-go/.gemini/settings.json'"
 expect "adapters are up to date" 0 "$ROOT/bin/build-adapters.sh" --check
+
+# --- open-pr.sh: host dispatch (gh/glab stubbed, no network) ---
+pr="$tmp/pr-repo"; prbin="$tmp/pr-bin"; mkdir -p "$pr/.claude" "$prbin"; : > "$pr/.claude/project.env"
+git -C "$pr" init -q -b main; ( cd "$pr" && git config user.email t@t && git config user.name t && echo a > a && git add -A && git commit -qm i && git checkout -qb feat ) >/dev/null 2>&1
+for t in gh glab; do printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s $*" >> "%s/calls"\n' "$t" "$tmp" > "$prbin/$t"; chmod +x "$prbin/$t"; done
+echo "the description" > "$tmp/pr-desc.md"
+git -C "$pr" remote add origin https://github.com/o/r.git
+expect "open-pr refuses an unpushed branch" 1 env PATH="$prbin:$PATH" PR_HOST=github bash -c "cd '$pr' && '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main"
+git -C "$pr" update-ref refs/remotes/origin/feat HEAD
+rm -f "$tmp/calls"; expect "open-pr github calls gh pr create" 0 bash -c "cd '$pr' && PATH='$prbin:$PATH' PR_HOST=github '$ROOT/scripts/open-pr.sh' 'My title' '$tmp/pr-desc.md' main && grep -qx 'gh pr create --base main --head feat --title My title --body-file $tmp/pr-desc.md' '$tmp/calls'"
+rm -f "$tmp/calls"; expect "open-pr gitlab calls glab mr create" 0 bash -c "cd '$pr' && PATH='$prbin:$PATH' PR_HOST=gitlab '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main && grep -q '^glab mr create --source-branch feat --target-branch main --title T --description the description --yes' '$tmp/calls'"
+rm -f "$tmp/calls"; expect "open-pr auto picks github from origin" 0 bash -c "cd '$pr' && PATH='$prbin:$PATH' PR_HOST=auto '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main && grep -q '^gh pr create' '$tmp/calls'"
+git -C "$pr" remote set-url origin git@gitlab.example.com:g/r.git
+rm -f "$tmp/calls"; expect "open-pr auto picks gitlab from origin" 0 bash -c "cd '$pr' && PATH='$prbin:$PATH' PR_HOST=auto '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main && grep -q '^glab mr create' '$tmp/calls'"
+git -C "$pr" remote set-url origin https://git.example.org/g/r.git
+expect "open-pr auto fails on an unknown origin" 2 env PATH="$prbin:$PATH" PR_HOST=auto bash -c "cd '$pr' && '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main"
+expect "open-pr auto honours GH_HOST" 0 bash -c "cd '$pr' && PATH='$prbin:$PATH' PR_HOST=auto GH_HOST=git.example.org '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main"
+expect "open-pr rejects unknown hosts" 2 env PR_HOST=svn bash -c "cd '$pr' && '$ROOT/scripts/open-pr.sh' T '$tmp/pr-desc.md' main"
+expect "open-pr needs a readable description" 2 env PATH="$prbin:$PATH" PR_HOST=github bash -c "cd '$pr' && '$ROOT/scripts/open-pr.sh' T '$tmp/missing.md' main"
 
 echo "tests: $pass passed, $failed failed"
 [ "$failed" = 0 ]

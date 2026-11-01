@@ -1,26 +1,52 @@
 #!/usr/bin/env bash
 # Open a pull request for the current branch. Host comes from PR_HOST in <project-dir>/sdkit.env (default: bitbucket).
 # Usage: open-pr.sh "<title>" <description-file> [destination-branch]   (destination defaults to BASE_BRANCH)
-# Bitbucket basic auth needs the account EMAIL (BITBUCKET_EMAIL, else git config user.email); the token is read from
-# the git remote URL and never printed. Other hosts: see the kit's docs/hosts.md.
+#   PR_HOST=bitbucket  Bitbucket REST API. Basic auth needs the account EMAIL (BITBUCKET_EMAIL, else git config user.email); the token
+#                      is read from the git remote URL (or BITBUCKET_TOKEN / PR_TOKEN_REPO) and never printed.
+#   PR_HOST=github     `gh pr create` (needs gh, authenticated with `gh auth login` or GH_TOKEN).
+#   PR_HOST=gitlab     `glab mr create` (needs glab, authenticated with `glab auth login` or GITLAB_TOKEN).
+#   PR_HOST=auto       picks one of the above from the origin URL (github.com, gitlab.*, bitbucket.org; GH_HOST / GITLAB_HOST for
+#                      self-hosted instances).
+# Details: the kit's docs/hosts.md.
 set -eu
-# The PR is opened against the repo of the current directory. The token comes from that repo's origin URL; if the URL
-# carries no credentials (credential-helper setups, sibling repos such as gitops), set PR_TOKEN_REPO in sdkit.env to a
-# local repo whose origin URL does, or export BITBUCKET_TOKEN.
 ROOT="$(git rev-parse --show-toplevel)"; cd "$ROOT"
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh" || { echo "sdkit: env.sh is missing next to $(basename "$0"): run sdkit upgrade" >&2; exit 1; }; sdkit_env_load "$ROOT"; export KIT_DIR
-TOKEN_REMOTE="$(git -C "${PR_TOKEN_REPO:-$ROOT}" remote get-url origin)"
 PR_HOST="${PR_HOST:-bitbucket}"
-if [ "$PR_HOST" != bitbucket ]; then
-  echo "PR_HOST=$PR_HOST is not implemented. Open the PR by hand (github: gh pr create, gitlab: glab mr create)." >&2
-  exit 2
+if [ "$PR_HOST" = auto ]; then
+  origin_url="$(git remote get-url origin 2>/dev/null || true)"
+  case "$origin_url" in
+    *github.com[:/]*) PR_HOST=github ;;
+    *bitbucket.org[:/]*) PR_HOST=bitbucket ;;
+    *gitlab.*) PR_HOST=gitlab ;;
+    *) if [ -n "${GH_HOST:-}" ] && [[ "$origin_url" == *"$GH_HOST"[:/]* ]]; then PR_HOST=github
+       elif [ -n "${GITLAB_HOST:-}" ] && [[ "$origin_url" == *"${GITLAB_HOST#*://}"[:/]* ]]; then PR_HOST=gitlab
+       else echo "PR_HOST=auto: cannot tell the host from origin '$origin_url'; set PR_HOST to bitbucket, github or gitlab" >&2; exit 2; fi ;;
+  esac
 fi
-ACCOUNT_EMAIL="${BITBUCKET_EMAIL:-$(git config user.email || true)}"
-[ -n "$ACCOUNT_EMAIL" ] || { echo "set BITBUCKET_EMAIL or git config user.email (the Bitbucket account email)" >&2; exit 2; }
+case "$PR_HOST" in
+  bitbucket|github|gitlab) ;;
+  *) echo "PR_HOST=$PR_HOST is not supported (bitbucket, github, gitlab, auto). Open the PR by hand." >&2; exit 2 ;;
+esac
 TITLE="${1:?title}"; DESCRIPTION_FILE="${2:?description file}"; DEST="${3:-${BASE_BRANCH:-develop}}"
+[ -r "$DESCRIPTION_FILE" ] || { echo "description file not readable: $DESCRIPTION_FILE" >&2; exit 2; }
 SOURCE="$(git rev-parse --abbrev-ref HEAD)"
 git rev-parse --verify -q "origin/$SOURCE" >/dev/null || { echo "push $SOURCE first (git push -u origin $SOURCE)"; exit 1; }
 
+case "$PR_HOST" in
+  github)
+    command -v gh >/dev/null || { echo "PR_HOST=github needs the gh CLI (https://cli.github.com), then gh auth login" >&2; exit 2; }
+    exec gh pr create --base "$DEST" --head "$SOURCE" --title "$TITLE" --body-file "$DESCRIPTION_FILE" ;;
+  gitlab)
+    command -v glab >/dev/null || { echo "PR_HOST=gitlab needs the glab CLI (https://gitlab.com/gitlab-org/cli), then glab auth login" >&2; exit 2; }
+    exec glab mr create --source-branch "$SOURCE" --target-branch "$DEST" --title "$TITLE" --description "$(cat "$DESCRIPTION_FILE")" --yes ;;
+esac
+
+# Bitbucket. The PR is opened against the repo of the current directory. The token comes from that repo's origin URL; if the URL
+# carries no credentials (credential-helper setups, sibling repos such as gitops), set PR_TOKEN_REPO in sdkit.env to a
+# local repo whose origin URL does, or export BITBUCKET_TOKEN.
+TOKEN_REMOTE="$(git -C "${PR_TOKEN_REPO:-$ROOT}" remote get-url origin)"
+ACCOUNT_EMAIL="${BITBUCKET_EMAIL:-$(git config user.email || true)}"
+[ -n "$ACCOUNT_EMAIL" ] || { echo "set BITBUCKET_EMAIL or git config user.email (the Bitbucket account email)" >&2; exit 2; }
 REMOTE="$(git remote get-url origin)"
 PR_TOKEN="${BITBUCKET_TOKEN:-}" PR_EMAIL="$ACCOUNT_EMAIL" PR_REMOTE="$REMOTE" PR_TOKEN_REMOTE="$TOKEN_REMOTE" PR_TITLE="$TITLE" PR_SOURCE="$SOURCE" \
 PR_DEST="$DEST" PR_DESC="$DESCRIPTION_FILE" python3 -I - <<'PY'

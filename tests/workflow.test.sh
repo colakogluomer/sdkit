@@ -12,6 +12,9 @@ nocheck() { local n="$1"; shift; if "$@" >/dev/null 2>&1; then bad "$n (should h
 eq() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (got '$2', wanted '$3')"; fi; }
 
 SDD="$KIT/scripts/sdd.sh"; WF="$KIT/scripts/workflow.sh"; C="$KIT/scripts/contract.sh"; ST="$KIT/scripts/state.sh"; HK="$KIT/hooks/check-contract.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 export VERIFY_BASE=main
 
 # newrepo <name> [extra sdkit.env lines]: a repo on branch feat, TELEMETRY=1, a proposal with a DoD and (for high risk) a design scenario
@@ -32,7 +35,7 @@ use() { cd "$1" || exit 1; export CLAUDE_PROJECT_DIR="$1"; EV="$1/.sdkit/work/t1
 to() {
   local want="$1" p
   for p in proposed red green; do
-    case "$p" in proposed) "$SDD" advance proposed ;; red) "$SDD" advance red --test-cmd false ;; green) echo "x=$p" >> src/a.sh; "$SDD" advance green --test-cmd true ;; esac >/dev/null 2>&1 || return 1
+    case "$p" in proposed) "$SDD" advance proposed ;; red) sdd_red ;; green) echo "x=$p" >> src/a.sh; sdd_green ;; esac >/dev/null 2>&1 || return 1
     [ "$p" = "$want" ] && return 0
   done
 }
@@ -66,7 +69,7 @@ chk_matrix() {  # from the current phase, every target but the next must be refu
   eq "from $cur every other target is refused, state untouched" "$(jq -S . .sdkit/.sdd/state.json)" "$before"
 }
 chk_matrix
-eq "intake>red is not-next"                             "$("$SDD" advance red --test-cmd false 2>&1 | grep -c 'Phases are not skipped')" 1
+eq "intake>red is not-next"                             "$(sdd_red 2>&1 | grep -c 'Phases are not skipped')" 1
 eq "reason recorded: not-next"                          "$(last_reason)" not-next
 "$SDD" advance bogus >/dev/null 2>&1; eq "reason recorded: unknown-phase" "$(last_reason)" unknown-phase
 mv openspec/changes/t1/proposal.md /tmp/prop.$$; "$SDD" advance proposed >/dev/null 2>&1; eq "missing artifact: no-artifact" "$(last_reason)" no-artifact
@@ -75,11 +78,11 @@ mv /tmp/prop.$$ openspec/changes/t1/proposal.md
 check "intake > proposed"                               "$SDD" advance proposed
 chk_matrix
 "$SDD" advance red --test-cmd true >/dev/null 2>&1;     eq "passing tests are not RED: tests-pass" "$(last_reason)" tests-pass
-check "proposed > red"                                  "$SDD" advance red --test-cmd false
+check "proposed > red"                                  sdd_red
 chk_matrix
 echo 'x=1' >> src/a.sh
-"$SDD" advance green --test-cmd false >/dev/null 2>&1;  eq "failing tests are not GREEN: tests-fail" "$(last_reason)" tests-fail
-check "red > green"                                     "$SDD" advance green --test-cmd true
+"$SDD" advance green >/dev/null 2>&1;  eq "failing tests are not GREEN: tests-fail" "$(last_reason)" tests-fail
+check "red > green"                                     sdd_green
 chk_matrix
 "$SDD" advance verified >/dev/null 2>&1;                eq "medium without a verdict: no-verdict" "$(last_reason)" no-verdict
 verdict BLOCK;  "$SDD" advance verified >/dev/null 2>&1; eq "a BLOCK verdict: verdict-block" "$(last_reason)" verdict-block
@@ -119,15 +122,15 @@ nocheck "refusing a start leaves no state"              test -f .sdkit/.sdd/stat
 check "small is fine for low risk"                      "$SDD" start t1 --risk low --profile small --proposal openspec/changes/t1/proposal.md
 eq "status shows a non-default profile"                 "$("$SDD" status)" "task=t1 risk=low phase=intake profile=small"
 nocheck "a second start is refused"                     "$SDD" start t2 --risk low --proposal openspec/changes/t1/proposal.md
-check "small walks the low flow to verified (verify command)" bash -c "cd '$R' && source /dev/null; '$SDD' advance proposed && '$SDD' advance red --test-cmd false && echo y >> src/a.sh && '$SDD' advance green --test-cmd true && '$SDD' advance verified"
+check "small walks the low flow to verified (verify command)" bash -c "cd '$R' && source /dev/null; '$SDD' advance proposed && '$SDD' advance red --test-cmd \"grep -q GM1 src/a.sh\" && echo GM1 >> src/a.sh && '$SDD' advance green && '$SDD' advance verified"
 check "small reaches done"                              bash -c "'$SDD' advance pr && '$SDD' advance done"
 echo "small never lowers the risk floor"
 R="$(newrepo floor 'RISK_FLOOR_GLOBS=high:src/*')"; use "$R"
 "$SDD" start t1 --risk low --profile small --proposal openspec/changes/t1/proposal.md >/dev/null
-"$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null; echo z >> src/a.sh
-nocheck "small + a diff in a high-risk path: green refused" "$SDD" advance green --test-cmd true
+"$SDD" advance proposed >/dev/null; sdd_red >/dev/null; echo z >> src/a.sh
+nocheck "small + a diff in a high-risk path: green refused" sdd_green
 eq "reason recorded: risk-floor"                        "$(last_reason)" risk-floor
-eq "the floor still names the label"                    "$("$SDD" advance green --test-cmd true 2>&1 | grep -c 'needs risk high')" 1
+eq "the floor still names the label"                    "$(sdd_green 2>&1 | grep -c 'needs risk high')" 1
 "$SDD" abort >/dev/null
 
 echo "high-assurance: an independent verifier even for low risk"
@@ -245,12 +248,12 @@ check "sdd.sh never mentions contracts"                 bash -c "! grep -qi cont
 echo "interrupted agents block green and verified under high-assurance only"
 R="$(newrepo intr)"; use "$R"
 "$SDD" start t1 --risk medium --profile high-assurance --proposal openspec/changes/t1/proposal.md >/dev/null
-"$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null; echo q >> src/a.sh
+"$SDD" advance proposed >/dev/null; sdd_red >/dev/null; echo q >> src/a.sh
 hand developer d1 src/ > h.md; "$C" issue h.md --role developer >/dev/null
-nocheck "an unanswered agent blocks green"              "$SDD" advance green --test-cmd true
-eq "reason: agents-pending, naming the id"              "$(last_reason) $("$SDD" advance green --test-cmd true 2>&1 | grep -c 't1/d1')" "agents-pending 1"
+nocheck "an unanswered agent blocks green"              sdd_green
+eq "reason: agents-pending, naming the id"              "$(last_reason) $(sdd_green 2>&1 | grep -c 't1/d1')" "agents-pending 1"
 "$C" close t1/d1 --reason interrupted >/dev/null
-check "closed (interrupted): green is possible"         "$SDD" advance green --test-cmd true
+check "closed (interrupted): green is possible"         sdd_green
 "$ST" t1 init medium feat >/dev/null
 check "the interrupted id is retried once"              "$ST" t1 retry t1/d1
 nocheck "...and only once"                              "$ST" t1 retry t1/d1
@@ -262,9 +265,9 @@ check "answered or closed: verified"                    "$SDD" advance verified
 "$SDD" abort >/dev/null
 R="$(newrepo intr2)"; use "$R"
 "$SDD" start t1 --risk medium --proposal openspec/changes/t1/proposal.md >/dev/null
-"$SDD" advance proposed >/dev/null; "$SDD" advance red --test-cmd false >/dev/null; echo q >> src/a.sh
+"$SDD" advance proposed >/dev/null; sdd_red >/dev/null; echo q >> src/a.sh
 hand developer d1 src/ > h.md; "$C" issue h.md --role developer >/dev/null
-check "standard: a pending agent does not block (legacy)" "$SDD" advance green --test-cmd true
+check "standard: a pending agent does not block (legacy)" sdd_green
 "$SDD" abort >/dev/null
 
 echo "concurrent state changes"
@@ -289,7 +292,7 @@ eq "a default run adds no decision event"               "$(jq -r 'select(.type==
 rm -rf .sdkit/work
 "$SDD" start t1 --risk low --profile high-assurance --proposal openspec/changes/t1/proposal.md >/dev/null
 eq "high-assurance: one contract-policy decision at start" "$(jq -r 'select(.type=="workflow.decision") | "\(.source):\(.outcome):\(.profile)"' "$EV")" "contract-policy:required:high-assurance"
-"$SDD" advance red --test-cmd false >/dev/null 2>&1
+sdd_red >/dev/null 2>&1
 eq "a rejected move: category, phase and reason"        "$(jq -r 'select(.type=="phase.reject") | "\(.category):\(.phase):\(.reason)"' "$EV")" "gate:red:not-next"
 check "no event carries a prompt, a path list or test output" bash -c "! grep -qE 'Definition of Done|x=|two writers' '$EV'"
 eq "summary shows the profile and the rejection"        "$("$KIT/scripts/telemetry.sh" summary t1 --json | jq -r '[.workflow.profile, (.workflow.rejections_by_reason|keys|join(","))]|join(" ")')" "high-assurance not-next"
@@ -303,11 +306,11 @@ R="$(newrepo old)"; use "$R"
 "$SDD" start t1 --risk medium --proposal openspec/changes/t1/proposal.md >/dev/null
 jq 'del(.profile)' .sdkit/.sdd/state.json > s.tmp && mv s.tmp .sdkit/.sdd/state.json   # a task opened by an older kit
 eq "a state without a profile reads as standard"        "$("$WF" policy --json | jq -r .profile)" standard
-check "...and walks the whole flow"                     bash -c "cd '$R' && '$SDD' advance proposed && '$SDD' advance red --test-cmd false && echo w >> src/a.sh && '$SDD' advance green --test-cmd true && '$SDD' _verdict PASS && '$SDD' advance verified && '$SDD' advance pr && '$SDD' advance done"
+check "...and walks the whole flow"                     bash -c "cd '$R' && '$SDD' advance proposed && '$SDD' advance red --test-cmd \"grep -q GM2 src/a.sh\" && echo GM2 >> src/a.sh && '$SDD' advance green && '$SDD' _verdict PASS && '$SDD' advance verified && '$SDD' advance pr && '$SDD' advance done"
 eq "its attestation names the standard profile"         "$(jq -r .profile .sdkit/attestations/t1.json)" standard
 "$SDD" abort >/dev/null
 cp -R "$KIT/scripts" "$T/scr-nowf"; rm "$T/scr-nowf/workflow.sh"
-check "workflow.sh missing (a half-upgraded install): sdd.sh still walks a task" bash -c "cd '$R' && S='$T/scr-nowf/sdd.sh' && \$S start t1 --risk low --profile high-assurance --proposal openspec/changes/t1/proposal.md && \$S advance proposed && \$S advance red --test-cmd false && echo n >> src/a.sh && \$S advance green --test-cmd true && \$S _verdict PASS && \$S advance verified"
+check "workflow.sh missing (a half-upgraded install): sdd.sh still walks a task" bash -c "cd '$R' && S='$T/scr-nowf/sdd.sh' && \$S start t1 --risk low --profile high-assurance --proposal openspec/changes/t1/proposal.md && \$S advance proposed && \$S advance red --test-cmd \"grep -q GM3 src/a.sh\" && echo GM3 >> src/a.sh && \$S advance green && \$S _verdict PASS && \$S advance verified"
 "$SDD" abort >/dev/null
 
 printf '\nworkflow tests: %d passed, %d failed\n' "$pass" "$fail"

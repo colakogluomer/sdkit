@@ -11,6 +11,9 @@ expect() { local n="$1"; shift; if "$@" >"$T/out" 2>&1; then ok "$n"; else bad "
 refuse() { local n="$1"; shift; if "$@" >"$T/out" 2>&1; then bad "$n (should have failed)"; else ok "$n"; fi; }
 says() { local n="$1" p; shift; for p in "$@"; do grep -q -- "$p" "$T/out" || { bad "$n (no '$p' in: $(head -c 200 "$T/out" | tr '\n' ' '))"; return; }; done; ok "$n"; }
 SDD="$KIT/scripts/sdd.sh"
+export SDKIT_GREEN="${TMPDIR:-/tmp}/sdkit-green.$$"   # RED fails until the test marks it green; GREEN re-runs the same command (sdd.sh binds them)
+sdd_red()   { rm -f "$SDKIT_GREEN"; "$SDD" advance red --test-cmd '[ -f "$SDKIT_GREEN" ]'; }
+sdd_green() { touch "$SDKIT_GREEN"; "$SDD" advance green; }
 n=0
 
 # repo <floor> [mode]: a repo on branch feat (cut from main), settings committed on main; prints nothing, cd's into it
@@ -28,7 +31,7 @@ repo() {
 }
 # open <risk>: a task that is ready for code (phase red)
 open() {
-  "$SDD" start t1 --risk "$1" --proposal openspec/changes/x/proposal.md >/dev/null && "$SDD" advance proposed >/dev/null && "$SDD" advance red --test-cmd false >/dev/null
+  "$SDD" start t1 --risk "$1" --proposal openspec/changes/x/proposal.md >/dev/null && "$SDD" advance proposed >/dev/null && sdd_red >/dev/null
 }
 PASSBLOCK='DOD\n- D1 it works | PASS | t_test.go:1\nFINDINGS\n- none\nVERIFY\n- command: verify.sh | result: green | ok\nVERDICT: PASS'
 verdict() { printf '{"agent_type":"verifier","last_assistant_message":"%s"}' "$PASSBLOCK" | "$KIT/hooks/record-verdict.sh"; }
@@ -42,7 +45,7 @@ trusted() {  # trusted <role> <message> <agent id>
 all_trusted() { trusted verifier "$PASSBLOCK" v1 && trusted reviewer "$REV" r1 && trusted security-auditor "$AUD" s1; }
 # finish <risk> <file>: the whole flow on one file, up to and including verified; leaves the attestation
 finish() {
-  open "$1" && echo "// $1" >> "$2" && "$SDD" advance green --test-cmd true >/dev/null || return 1
+  open "$1" && echo "// $1" >> "$2" && sdd_green >/dev/null || return 1
   if [ "$1" = high ]; then all_trusted; elif [ "$1" != low ]; then verdict; fi
   "$SDD" advance verified
 }
@@ -59,10 +62,10 @@ expect "key absent entirely: nothing changes"    finish low services/payments/pa
 echo "floor high on services/payments/*"
 G='high:services/payments/*'
 repo "$G"; open low >/dev/null; echo x >> services/payments/pay.go
-refuse "low task touching a floored file: green refused" "$SDD" advance green --test-cmd true
+refuse "low task touching a floored file: green refused" sdd_green
 says "the reason names the file and the level" 'services/payments/pay.go' 'high' 
 repo "$G"; open medium >/dev/null; echo x >> services/payments/pay.go
-refuse "medium task touching it: green refused"  "$SDD" advance green --test-cmd true
+refuse "medium task touching it: green refused"  sdd_green
 repo "$G"; expect "high task touching it verifies" finish high services/payments/pay.go
 expect "attestation records floor high and risk high" bash -c "[ \"\$(jq -r .floor $ATT)\" = high ] && [ \"\$(jq -r .risk $ATT)\" = high ]"
 expect "ci-check passes for it"                  "$SDD" ci-check
@@ -70,18 +73,18 @@ repo "$G"; expect "low task on a non-matching file verifies" finish low src/othe
 repo "$G"; expect "medium task on a non-matching file verifies" finish medium src/other.go
 echo "the floor is taken from the real diff, not the scope the task started with"
 repo "$G"; open low >/dev/null; echo x >> src/other.go
-expect "green on a harmless file"                "$SDD" advance green --test-cmd true
+expect "green on a harmless file"                sdd_green
 echo x >> services/payments/pay.go
 refuse "a floored file added before verified: refused" "$SDD" advance verified
 says "named in the reason"                        'services/payments/pay.go' 
 echo "an untracked new file under a floored path counts too"
 repo "$G"; open low >/dev/null; echo x > services/payments/new.go
-refuse "untracked floored file: green refused"   "$SDD" advance green --test-cmd true
+refuse "untracked floored file: green refused"   sdd_green
 echo "ordinary workflow commands cannot lower it"
 repo "$G"; open low >/dev/null; echo x >> services/payments/pay.go
-refuse "low: refused"                            "$SDD" advance green --test-cmd true
+refuse "low: refused"                            sdd_green
 "$SDD" abort >/dev/null
-open low >/dev/null; refuse "abort + start low again: still refused" "$SDD" advance green --test-cmd true
+open low >/dev/null; refuse "abort + start low again: still refused" sdd_green
 refuse "start while a task is open"              "$SDD" start t2 --risk low --proposal openspec/changes/x/proposal.md
 expect "the state file is not editable by hand"  bash -c "printf '%s' '{\"tool_input\":{\"command\":\"jq .risk=\\\"high\\\" .sdkit/.sdd/state.json\"}}' | $KIT/hooks/guard-pr.sh | grep -q deny"
 
@@ -89,25 +92,25 @@ echo "levels: medium floor"
 M='medium:migrations/*.sql,medium:*/auth/*'
 repo "$M"; mkdir -p migrations db/auth; echo x > migrations/001.sql; echo x > db/auth/a.go; git add -A; git commit -qm m
 open low >/dev/null; echo y >> migrations/001.sql
-refuse "low touching migrations/*.sql: refused"  "$SDD" advance green --test-cmd true
+refuse "low touching migrations/*.sql: refused"  sdd_green
 repo "$M"; mkdir -p migrations db/auth; echo x > migrations/001.sql; echo x > db/auth/a.go; git add -A; git commit -qm m
 expect "medium touching it verifies"             finish medium migrations/001.sql
 repo "$M"; mkdir -p db/auth; echo x > db/auth/a.go; git add -A; git commit -qm m
 open low >/dev/null; echo y >> db/auth/a.go
-refuse "a path glob (*/auth/*) matches too"      "$SDD" advance green --test-cmd true
+refuse "a path glob (*/auth/*) matches too"      sdd_green
 echo "the strictest matching level wins"
 repo "medium:src/*,high:src/other.go"; open medium >/dev/null; echo x >> src/other.go
-refuse "medium task on a file matching medium and high: refused" "$SDD" advance green --test-cmd true
+refuse "medium task on a file matching medium and high: refused" sdd_green
 says "names high" 'high'
 echo "low:... entries never block a task"
 repo "low:src/*"; expect "a low floor changes nothing for a low task" finish low src/other.go
 
 echo "modes"
 repo "$G" guided; open low >/dev/null; echo x >> services/payments/pay.go
-expect "guided: warns, does not refuse"          "$SDD" advance green --test-cmd true
+expect "guided: warns, does not refuse"          sdd_green
 says "the warning is shown" 'warning'
 repo "$G" off;    open low >/dev/null; echo x >> services/payments/pay.go
-expect "off: ignored"                            "$SDD" advance green --test-cmd true
+expect "off: ignored"                            sdd_green
 
 echo "invalid configuration fails closed"
 for bad_cfg in 'urgent:src/*' 'high' 'high:' 'HIGH:src/*' 'medium:a,oops'; do
@@ -163,7 +166,7 @@ env_file 'SDD_MODE=strict\nRISK_FLOOR_GLOBS=low:services/*\n'; att low ""
 refuse "PR swaps in a harmless floor: base wins"  "$SDD" ci-check
 env_file 'SDD_MODE=off\nRISK_FLOOR_GLOBS=\n'; att low ""
 refuse "PR sets SDD_MODE=off: base is on, still checked" "$SDD" ci-check
-says "and says so" 'checking anyway'
+says "the base branch's settings judge it" 'below the risk floor high'
 env_file "SDD_MODE=strict\nRISK_FLOOR_GLOBS=$G\nSDD_FREE_GLOBS=services/*\n"; att low ""
 refuse "PR frees the floored path via SDD_FREE_GLOBS: still gated" "$SDD" ci-check
 env_file "SDD_MODE=strict\nRISK_FLOOR_GLOBS=$G\n"; att high PASS
