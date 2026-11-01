@@ -1,154 +1,154 @@
-# Kısa başvuru
+# Quick reference
 
-Ayrıntı için [guide.md](guide.md).
+For details see [guide.md](guide.md).
 
-## Günlük kullanım
+## Daily use
 
 ```
-/spec-driven-dev <ticket veya açıklama>     # yeni görev (tam ad: /spec-driven-kit:spec-driven-dev)
-/incident-to-rule                           # bir hata çözüldükten sonra, kalıcı koruma ekle
-/scaffold-init                              # yeni repo, bir kez (kuran kişi); host: claude, codex, opencode, cursor, gemini (virgülle birden çok)
-                                            # Codex'te çağrı: $spec-driven-dev
-/scaffold-doctor                            # kurulum sağlam mı?
+/spec-driven-dev <ticket or description>    # new task (full name: /spec-driven-kit:spec-driven-dev)
+/incident-to-rule                           # after a bug is fixed, add a lasting guard
+/scaffold-init                              # new repo, once (by the person setting it up); host: claude, codex, opencode, cursor, gemini (several, comma-separated)
+                                            # on Codex invoke it as: $spec-driven-dev
+/scaffold-doctor                            # is the install sound?
 ```
 
-## Risk etiketi ne yapar
+## What the risk label does
 
 | | low | medium | high |
 |---|---|---|---|
-| Keşif + öneri + **DoD** | evet | evet | evet |
-| `design.md`'de yarış/sıralama senaryosu | | | **zorunlu** |
-| Test önce (RED → GREEN) | evet | evet | evet (testi ayrı agent yazar ve dondurur) |
-| Bağımsız `verifier` | yok | **zorunlu** | **zorunlu** + `code-review` + `security-review` |
-| PR'ı Claude açar | evet | evet | evet |
+| Explore + proposal + **DoD** | yes | yes | yes |
+| Race/ordering scenario in `design.md` | | | **mandatory** |
+| Test first (RED → GREEN) | yes | yes | yes (a separate agent writes and freezes the test) |
+| Independent `verifier` | no | **mandatory** | **mandatory** + `code-review` + `security-review` |
+| Claude opens the PR | yes | yes | yes |
 
-Etiketi analist önerir, **sen onaylarsın**. Ticket önceliği etiketi belirlemez.
+The analyst proposes the label, **you confirm it**. Ticket priority does not set the label.
 
-## Akış (kısa)
+## Flow (short)
 
-1. **Analist** görevi inceler; eksik varsa sorar (turda en fazla 4 soru, önerilen varsayılan ilk seçenek)
-2. Risk etiketi onayı → keşif
-3. **Plan kapısı**: kapsam, DoD (her maddenin "Verified by"ı), tasarım, görevler/roller, riskler sana detaylıca sorulur. Düzenleyebilirsin; değişiklik plana yayılır.
-   Son onay: `Onayla ve propose et` / `Bir bölümü düzenle` / `Burada dur`
-4. `propose` → test önce → rollerle uygulama → bağımsız doğrulama → PR
-5. İstediğin an "planı güncelle" diyebilirsin; yalnızca etkilenen turlar tekrarlanır
+1. The **analyst** reviews the task; if something is missing it asks (at most 4 questions per round, the recommended default first)
+2. Risk label confirmation → explore
+3. **Plan gate**: scope, DoD (each item's "Verified by"), design, tasks/roles and risks are put to you in detailed questions. You can edit; changes propagate through the plan.
+   Final approval: `Approve and propose` / `Edit a section` / `Stop here`
+4. `propose` → test first → implementation by roles → independent verification → PR
+5. You can say "update the plan" at any time; only the affected rounds are repeated
 
-## Roller
+## Roles
 
-`orchestrator` (ana oturum) · `analyst` eksik mi? · `scout` ucuz arama · `engineer` tasarım ve test stratejisi · `developer` kod · `test-writer` test ·
-`devsecops` pipeline/altyapı · `reviewer` / `security-auditor` / `verifier` bağımsız ve salt okunur (`high` riskte `verifier-deep`, strong katman). Gerçekleştiren asla doğrulamaz.
-Roller birbirini çağırmaz; arama gerekiyorsa `NEEDS-LOOKUP:` yazar, orchestrator `scout` çalıştırır.
+`orchestrator` (main session) · `analyst` is anything missing? · `scout` cheap lookup · `engineer` design and test strategy · `developer` code · `test-writer` tests ·
+`devsecops` pipeline/infrastructure · `reviewer` / `security-auditor` / `verifier` independent and read-only (`verifier-deep` at `high` risk, strong tier). The implementer never verifies.
+Roles do not call each other; if a lookup is needed they write `NEEDS-LOOKUP:` and the orchestrator runs `scout`.
 
-## Hostlar ve stack'ler
+## Hosts and stacks
 
-| | Seçenekler |
+| | Options |
 |---|---|
-| Host (`init.sh --host a,b`) | `claude` (varsayılan), `codex`, `opencode`, `cursor`, `gemini`. Proje klasörü her host için `.sdkit/` (eski kurulumlarda `.claude`/`.codex`/`.agentkit`); ayarlar ortak `sdkit.env` + kişisel `sdkit.local.env` |
-| Stack (`--stack`, yoksa otomatik) | `go`, `spring-boot`, `nextjs`, `react-native` (algılama sırası bu; repo başına tek stack) |
+| Host (`init.sh --host a,b`) | `claude` (default), `codex`, `opencode`, `cursor`, `gemini`. The project dir is `.sdkit/` for every host (`.claude`/`.codex`/`.agentkit` in old installs); settings: shared `sdkit.env` + personal `sdkit.local.env` |
+| Stack (`--stack`, otherwise automatic) | `go`, `spring-boot`, `nextjs`, `react-native` (this is the detection order; one stack per repo) |
 
-Claude dışı hostlarda guard'lar commit/push anında (`.githooks`), host destekliyorsa araç çağrısında da çalışır; adapter'lar canlı kurulumda doğrulanmadı ([guide.md](guide.md) §13, §16).
+On non-Claude hosts the guards run at commit/push time (`.githooks`), and also on tool calls if the host supports it; the adapters were not validated on a live install ([guide.md](guide.md) §13, §16).
 
-## Paralel çalışma
-
-```bash
-<kit>/scripts/plan-waves.sh tasks.md      # bağımsız görevleri dalgalara ayırır
-<kit>/scripts/worktree.sh add T3          # görev için izole worktree
-<kit>/scripts/worktree.sh merge T3        # dalga sonunda birleştir, sonra verify --fast
-```
-Görev: `- [ ] T3 açıklama | role: developer | size: medium | writes: yol/ | after: T1`. Varsayılan sıralıdır; paralel yalnızca ayrık `writes:` ile ve en fazla `MAX_PARALLEL` (3) subagent. `size:` (small/medium/large → light/standard/strong) isteğe bağlıdır; yoksa rolün katmanı geçerli. Diğer host'larda: `run-role.sh <rol> --handoff F --tier light|standard|strong`.
-
-## Durum, devam, maliyet
+## Parallel work
 
 ```bash
-<kit>/scripts/state.sh <slug> show              # görev durumu (work/<slug>/state.json); /clear veya çökmeden sonra buradan devam
-sdkit report task|session|latest|history [--detailed|--json|--markdown]   # Value Report: kim ne yaptı, ne harcadı, neyi tasarruf etti (VALUE_REPORT=on ile görev/oturum sonunda otomatik)
-<kit>/scripts/usage.sh report [slug] [--project] [--session ID|current] [--json]   # rol/model/oturum başına token, önbellek isabeti, tahmini USD (API-eşdeğeri), kapsam uyarıları (USAGE_LOG=1 gerekir)
-<kit>/scripts/usage.sh scan [--session ID]       # hook'un görmediği Claude Code oturumunu transkriptten deftere al (origin observed)
-<kit>/scripts/usage.sh prices                    # hangi fiyat tablosu geçerli (pricing.json v2: model, sağlayıcı, etkin tarih)
-<kit>/scripts/usage.sh budget [slug]            # TOKEN_BUDGET_TASK'e göre kullanım (çıkış 3 uyarı, 4 aşıldı)
-<kit>/scripts/telemetry.sh summary [slug] [--json]  # koşu özeti: faz/ajan süreleri, token (ölçülen/toplam), yeniden deneme, hata, doğrulama (TELEMETRY=1 gerekir)
-<kit>/scripts/telemetry.sh archive <slug>         # kapanıştan önce: olayları work/_archive/ altına al
-<kit>/bench/run.sh run all                         # simüle benchmark (ücretsiz); gerçek: --real --host H --yes
-<kit>/bench/run.sh run contracts | overhead        # F02: 5 sözleşme fikstürü | sözleşmeli/sözleşmesiz ek yük (bayt, olay, betik çağrısı, gecikme)
-<kit>/scripts/contract.sh issue F | check-result F --id I --role R --record   # ajan sözleşmesi (CONTRACTS=1): devri / cevabı doğrula (0 done, 1 partial|blocked|failed, 2 geçersiz; 0 "doğrulandı" DEĞİLDİR)
-<kit>/scripts/sdd.sh start <slug> --risk R --profile small|standard|high-assurance --proposal P   # profil (varsayılan standard)
-<kit>/scripts/sdd.sh transitions | policy [--json]   # geçerli faz geçişleri ve girişleri | görev için geçerli kurallar (workflow.sh)
-<kit>/scripts/sdd.sh evidence [--json]            # yüksek risk: verifier/reviewer/security-auditor kanıtının durumu (valid|stale|untrusted|...)
-<kit>/scripts/contract.sh pending | status      # cevapsız devirler | görevin tüm kimlikleri
-<kit>/scripts/memory.sh candidates <slug>       # kapanışta bellek adayları (MEMORY=1); search | stale | add | promote
-<kit>/scripts/lookup-cache.sh get <slug> "soru" # scout cevabı önbelleği; ıskada 1
-<kit>/scripts/run-role.sh verifier --handoff F --cwd D --host H   # rolü ayrı süreçte çalıştır; VERIFIER_HOST ile başka sağlayıcı
-<kit>/scripts/route.sh explain --role R [--risk L]   # yönlendirme kararı (ROUTING=on): adaptör, model, neden, bütçe; model çağrısı yok, kayıt yok
-<kit>/scripts/route.sh registry | capabilities | validate   # model kayıt defteri | adaptör yetenekleri | ayar denetimi
-<kit>/scripts/check-plan-parity.sh plan.md proposal.md [tasks.md]  # DoD satırları: D<n>: metin | Verified by: tür
+<kit>/scripts/plan-waves.sh tasks.md      # splits independent tasks into waves
+<kit>/scripts/worktree.sh add T3          # isolated worktree for the task
+<kit>/scripts/worktree.sh merge T3        # merge at the end of the wave, then verify --fast
+```
+Task: `- [ ] T3 description | role: developer | size: medium | writes: path/ | after: T1`. Sequential by default; parallel only with disjoint `writes:` and at most `MAX_PARALLEL` (3) subagents. `size:` (small/medium/large → light/standard/strong) is optional; without it the role's tier applies. On other hosts: `run-role.sh <role> --handoff F --tier light|standard|strong`.
+
+## State, resume, cost
+
+```bash
+<kit>/scripts/state.sh <slug> show              # task state (work/<slug>/state.json); resume from here after /clear or a crash
+sdkit report task|session|latest|history [--detailed|--json|--markdown]   # Value Report: who did what, what it cost, what it saved (automatic at task/session end with VALUE_REPORT=on)
+<kit>/scripts/usage.sh report [slug] [--project] [--session ID|current] [--json]   # tokens, cache hit rate, estimated USD (API-equivalent) per role/model/session, coverage warnings (needs USAGE_LOG=1)
+<kit>/scripts/usage.sh scan [--session ID]       # ledger a Claude Code session the hook did not see, from its transcript (origin observed)
+<kit>/scripts/usage.sh prices                    # which price table is in force (pricing.json v2: model, provider, effective date)
+<kit>/scripts/usage.sh budget [slug]            # usage against TOKEN_BUDGET_TASK (exit 3 warning, 4 exceeded)
+<kit>/scripts/telemetry.sh summary [slug] [--json]  # run summary: phase/agent durations, tokens (measured/total), retries, failures, verification (needs TELEMETRY=1)
+<kit>/scripts/telemetry.sh archive <slug>         # before closeout: move the events under work/_archive/
+<kit>/bench/run.sh run all                         # simulated benchmark (free); real: --real --host H --yes
+<kit>/bench/run.sh run contracts | overhead        # F02: 5 contract fixtures | overhead with/without contracts (bytes, events, script calls, latency)
+<kit>/scripts/contract.sh issue F | check-result F --id I --role R --record   # agent contract (CONTRACTS=1): validate the handoff / the answer (0 done, 1 partial|blocked|failed, 2 invalid; 0 does NOT mean "verified")
+<kit>/scripts/sdd.sh start <slug> --risk R --profile small|standard|high-assurance --proposal P   # profile (default standard)
+<kit>/scripts/sdd.sh transitions | policy [--json]   # valid phase transitions and entries | rules in force for the task (workflow.sh)
+<kit>/scripts/sdd.sh evidence [--json]            # high risk: state of the verifier/reviewer/security-auditor evidence (valid|stale|untrusted|...)
+<kit>/scripts/contract.sh pending | status      # unanswered handoffs | all ids of the task
+<kit>/scripts/memory.sh candidates <slug>       # memory candidates at closeout (MEMORY=1); search | stale | add | promote
+<kit>/scripts/lookup-cache.sh get <slug> "question" # scout answer cache; 1 on a miss
+<kit>/scripts/run-role.sh verifier --handoff F --cwd D --host H   # run the role in a separate process; another provider with VERIFIER_HOST
+<kit>/scripts/route.sh explain --role R [--risk L]   # routing decision (ROUTING=on): adapter, model, reason, budget; no model call, no record
+<kit>/scripts/route.sh registry | capabilities | validate   # model registry | adapter capabilities | settings check
+<kit>/scripts/check-plan-parity.sh plan.md proposal.md [tasks.md]  # DoD lines: D<n>: text | Verified by: type
 ```
 
-## Claude durduğunda ne yapmalı
+## What to do when Claude stops
 
-| Durum | Anlamı | Ne yap |
+| Situation | Meaning | What to do |
 |---|---|---|
-| "Risk rubriği yok" | `project.md`'de rubrik tanımlı değil | Rubriği sen yaz; Claude uydurmaz |
-| "Test edilemiyor" seçenekleri | Kod gerçek altyapı olmadan test edilemiyor | Seçeneklerden birini seç (dar arayüz / kapsam dışı bırak ve kaydet / entegrasyon altyapısı) |
-| Release dondurulmuş | Dal açılacak release `freeze/` etiketli | Hangi dalın kullanılacağına sen karar ver |
-| Verifier `BLOCK` | DoD `FAIL` veya `CONFIRMED` bulgu | Uygulama hatasıysa bir otomatik deneme; spec boşluğuysa sana döner |
-| İkinci `BLOCK` | Otomatik döngü bitti | Özeti oku, karar ver; üçüncü otomatik deneme yok |
-| Hook `ask` | Korunan yol / prod `kubectl` / env branch push | Onayla veya reddet |
-| Hook `deny` | Secret dosyası, donmuş test, yanlış dal kaynağı | Mesaj nedenini söyler; engeli aşmak yerine nedeni düzelt |
-| Git hook reddetti (Claude dışı hostlar) | `guard.sh`: secret, donmuş test, korunan yol, korunan branch | Nedeni düzelt; onaylıysa `ALLOW_PROTECTED=1` / `ALLOW_PROTECTED_PUSH=1` |
-| Stop sırasında "verify kırık" | Commit'siz değişiklik stack'in hızlı kontrolünde (ör. vet/build) kırık | Claude düzeltir; sonsuz döngü yok |
+| "No risk rubric" | No rubric is defined in `project.md` | Write the rubric yourself; Claude does not invent one |
+| "Cannot be tested" options | The code cannot be tested without real infrastructure | Pick one of the options (narrow interface / leave out of scope and record it / integration infrastructure) |
+| Release frozen | The release to branch from is tagged `freeze/` | You decide which branch to use |
+| Verifier `BLOCK` | DoD `FAIL` or a `CONFIRMED` finding | One automatic retry if it is an implementation bug; if it is a spec gap it comes back to you |
+| Second `BLOCK` | The automatic loop is over | Read the summary and decide; there is no third automatic retry |
+| Hook `ask` | Protected path / prod `kubectl` / env branch push | Approve or deny |
+| Hook `deny` | Secret file, frozen test, wrong branch source | The message gives the reason; fix the cause instead of working around the block |
+| Git hook refused (non-Claude hosts) | `guard.sh`: secret, frozen test, protected path, protected branch | Fix the cause; if approved, `ALLOW_PROTECTED=1` / `ALLOW_PROTECTED_PUSH=1` |
+| "verify failed" at Stop | An uncommitted change fails the stack's fast check (e.g. vet/build) | Claude fixes it; no infinite loop |
 
-## Hook'lar tek bakışta
+## Hooks at a glance
 
-| Hook | Karar | Kapatan ayar |
+| Hook | Decision | Disabled by |
 |---|---|---|
-| `guard-secrets` | deny: `.env*`, `*credentials*`, `*.pem` | `SECRET_GLOBS` boş |
-| `guard-protected` | ask: `PROTECTED_PATHS` altı | `PROTECTED_PATHS` boş |
-| `frozen-tests` | deny: `<project-dir>/.frozen` listesi | dosya yok |
-| `guard-prod` | ask: prod cluster'a değiştirici `kubectl` | `PROD_KUBE_CLUSTERS` boş |
-| `guard-git` | deny/ask: release akışı kuralları | `BASE_BRANCH_MODE` ≠ `release` |
-| `post-edit-fmt` | stack'in biçimlendiricisi (ör. `gofmt -w`) | stack aracı yok |
-| `stop-verify` | block: kırık vet/build ile "bitti" | verify betiği yok |
-| `guard-readonly` | deny: salt okunur rolün dosya değiştirmesi | çağrıda rol yoksa kapalı |
-| `value-report` | oturum bitişinde/başlangıcında Value Report oturum özeti (engellemez, stdout yok) | `VALUE_REPORT` ≠ `on` |
-| `usage-log` | token defteri ve (`TELEMETRY=1`) `agent.end` olayı (engellemez) | `USAGE_LOG` ve `TELEMETRY` ≠ `1` |
-| `guard-budget` | ask/uyarı: `MAX_SPAWNS` veya `TOKEN_BUDGET_TASK` aşıldı | ikisi de boş |
-| `result-size` | uyarı: rol cevabı çok uzun | `SUBAGENT_RESULT_MAX_LINES` boş |
-| `check-contract` | ask (strict, geçersiz devir) / uyarı: devir ya da `HANDOFF-RESULT` satırı sözleşmeye uymuyor; verdict'e dokunmaz | `CONTRACTS` ≠ `1` veya devirde `CONTRACT:` yok |
-| `session-context`, `check-tools` | bilgi | |
+| `guard-secrets` | deny: `.env*`, `*credentials*`, `*.pem` | `SECRET_GLOBS` empty |
+| `guard-protected` | ask: under `PROTECTED_PATHS` | `PROTECTED_PATHS` empty |
+| `frozen-tests` | deny: the `<project-dir>/.frozen` list | file absent |
+| `guard-prod` | ask: mutating `kubectl` against a prod cluster | `PROD_KUBE_CLUSTERS` empty |
+| `guard-git` | deny/ask: release flow rules | `BASE_BRANCH_MODE` ≠ `release` |
+| `post-edit-fmt` | the stack's formatter (e.g. `gofmt -w`) | no stack tool |
+| `stop-verify` | block: "done" with a broken vet/build | no verify script |
+| `guard-readonly` | deny: a read-only role changing files | off if the call has no role |
+| `value-report` | Value Report session summary at session end/start (does not block, no stdout) | `VALUE_REPORT` ≠ `on` |
+| `usage-log` | token ledger and (`TELEMETRY=1`) the `agent.end` event (does not block) | `USAGE_LOG` and `TELEMETRY` ≠ `1` |
+| `guard-budget` | ask/warning: `MAX_SPAWNS` or `TOKEN_BUDGET_TASK` exceeded | both empty |
+| `result-size` | warning: role answer too long | `SUBAGENT_RESULT_MAX_LINES` empty |
+| `check-contract` | ask (strict, invalid handoff) / warning: the handoff or the `HANDOFF-RESULT` line does not match the contract; does not touch the verdict | `CONTRACTS` ≠ `1` or no `CONTRACT:` in the handoff |
+| `session-context`, `check-tools` | info | |
 
-Hook'lar emniyettir, güvenlik sınırı değil (regex tabanlı).
+Hooks are safety nets, not a security boundary (regex-based).
 
-## Doğrulama
+## Verification
 
 ```bash
-<kit>/stacks/<stack>/scripts/verify.sh              # tam: stack'in kontrolleri + verify.d (Go: gofmt, vet, build, test, lint)
-<kit>/stacks/<stack>/scripts/verify.sh --fast       # yalnızca ucuz kontroller (Go: vet + build)
-<kit>/stacks/<stack>/scripts/verify.sh --since-head # yalnızca commit'siz değişiklikler
-<kit>/stacks/<stack>/scripts/verify.sh --no-cache   # aynı ağaç için yeşil sonuç önbelleğini yok say
-<kit>/bin/doctor.sh <repo>                     # kurulum kontrolü
-<kit>/bin/upgrade.sh <repo>                    # yeni kit sürümüne yükselt (önce /plugin ile plugin'i yenile)
-<kit>/bin/build-adapters.sh --check            # (kit bakımcısı) roller ve üretilen dosyalar senkron mu
-<kit>/tests/run.sh                             # (kit bakımcısı) betik/hook/init smoke testi
+<kit>/stacks/<stack>/scripts/verify.sh              # full: the stack's checks + verify.d (Go: gofmt, vet, build, test, lint)
+<kit>/stacks/<stack>/scripts/verify.sh --fast       # cheap checks only (Go: vet + build)
+<kit>/stacks/<stack>/scripts/verify.sh --since-head # uncommitted changes only
+<kit>/stacks/<stack>/scripts/verify.sh --no-cache   # ignore the green-result cache for the same tree
+<kit>/bin/doctor.sh <repo>                     # install check
+<kit>/bin/upgrade.sh <repo>                    # upgrade to a new kit version (refresh the plugin with /plugin first)
+<kit>/bin/build-adapters.sh --check            # (kit maintainer) are the roles and generated files in sync
+<kit>/tests/run.sh                             # (kit maintainer) script/hook/init smoke test
 ```
 
-`verify.d` betiği: `<project-dir>/verify.d/NN-ad.sh`, `chmod +x`, `. "$VERIFY_LIB"`, sorun için `FAIL: ...` / `WARN: ...` basar.
-`_` ile başlayanlar çalıştırılmaz; `init`'in getirdiği `.example` dosyaları uzantı silinene kadar kapalıdır.
+`verify.d` script: `<project-dir>/verify.d/NN-name.sh`, `chmod +x`, `. "$VERIFY_LIB"`, prints `FAIL: ...` / `WARN: ...` for a problem.
+Files starting with `_` are not run; the `.example` files `init` brings are off until the extension is removed.
 
-## Hata çözüldükten sonra (`incident-to-rule`)
+## After a bug is fixed (`incident-to-rule`)
 
-Sırayla ilk uyan: lint kuralı → `verify.d` politikası → regresyon testi → hook → `known-pitfalls.md` kaydı.
-Koruma, hatayı üreten diff'te **kırılıp** düzeltmede **geçmeden** güvenilmez.
+First match in order: lint rule → `verify.d` policy → regression test → hook → `known-pitfalls.md` entry.
+A guard is not trusted until it **fails** on the diff that produced the bug and **passes** on the fix.
 
-## Sık sorunlar
+## Common problems
 
-| Belirti | Neden / çözüm |
+| Symptom | Cause / fix |
 |---|---|
-| Plugin istemi çıkmadı | `/plugin marketplace add <kit-repo-url>`, sonra `/plugin install spec-driven-kit@spec-driven-kit` |
-| Proje izinleri/plugin devrede değil | Güven onayı verilmedi; proje ayarları ondan önce uygulanmaz |
-| `verify.d` betiği çalışmıyor | `chmod +x` eksik, adı `_` ile başlıyor veya `.example` uzantılı |
-| Guard çalışmıyor | İlgili ayar boş (yukarıdaki tablo) veya `doctor.sh` ile kurulumu kontrol et |
-| Kit güncellendi, projede değişmedi | Plugin modu: `/plugin` ile güncelle. Copy modu: `sync.sh` |
-| Claude dışı hostta guard çalışmıyor | `git config core.hooksPath .githooks` bu klonda çalıştırılmadı |
-| "stack algılanamadı" | `init.sh --stack go\|spring-boot\|nextjs\|react-native` ver; başka stack için kit'e yenisi gerekir ([guide.md](guide.md) §14) |
-| Verify "cached" dedi | Aynı ağaç daha önce yeşildi; yeniden çalıştırmak için `--no-cache` |
-| PR açılmadı, kod 2 | `PR_HOST` Bitbucket değil; [hosts.md](hosts.md) |
+| No plugin prompt appeared | `/plugin marketplace add <kit-repo-url>`, then `/plugin install spec-driven-kit@spec-driven-kit` |
+| Project permissions/plugin not active | Trust was not granted; project settings are not applied before that |
+| A `verify.d` script does not run | Missing `chmod +x`, its name starts with `_`, or it has the `.example` extension |
+| A guard does not run | The related setting is empty (table above), or check the install with `doctor.sh` |
+| Kit updated, nothing changed in the project | Plugin mode: update with `/plugin`. Copy mode: `sync.sh` |
+| Guard does not run on a non-Claude host | `git config core.hooksPath .githooks` was not run in this clone |
+| "no known stack detected" | Pass `init.sh --stack go\|spring-boot\|nextjs\|react-native`; another stack needs a new one in the kit ([guide.md](guide.md) §14) |
+| Verify said "cached" | The same tree was green before; use `--no-cache` to run it again |
+| PR not opened, code 2 | `PR_HOST` is not bitbucket/github/gitlab/auto, or `gh`/`glab` is missing; [hosts.md](hosts.md) |

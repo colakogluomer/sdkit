@@ -1,18 +1,18 @@
-# Yürütme adaptörleri (F12) ve isteğe bağlı LiteLLM (F13)
+# Execution adapters (F12) and optional LiteLLM (F13)
 
-## Sözleşme
-Yerleşik host'lar (`claude codex opencode cursor gemini`) `run-role.sh` ile **eskisi gibi** çalışır; `core/adapters.json` yeteneklerini bildirir. Harici adaptör `<project-dir>/adapters.d/<ad>.sh` (veya kit'in `adapters.d/`) çalıştırılabilir dosyasıdır; `run-role.sh --host ext:<ad>` ile çağrılır, yani risk tabanı, spawn kaydı, `parse-verdict --record`, kullanım defteri ve yönlendirme yolu **değişmez**. Adaptör kendi verdict'ini asla kaydetmez.
+## Contract
+Built-in hosts (`claude codex opencode cursor gemini`) run through `run-role.sh` **as before**; `core/adapters.json` declares their capabilities. An external adapter is an executable file `<project-dir>/adapters.d/<name>.sh` (or in the kit's `adapters.d/`); it is called with `run-role.sh --host ext:<name>`, so the risk baseline, spawn record, `parse-verdict --record`, usage ledger and routing path are **unchanged**. An adapter never records its own verdict.
 
-| Fiil | Çağrı | Beklenen çıktı |
+| Verb | Call | Expected output |
 |---|---|---|
-| capabilities | `<f> capabilities` | tam 8 anahtarlı JSON (`noninteractive tool_use model_selection usage_reporting structured_output cancellation timeout cost_reporting`), değerler `help-verified\|declared\|estimated\|kit\|none` |
-| execute | `<f> execute --role R --cwd D --tier T --ro 0\|1 [--model M] --prompt-file P` | `{"result": metin, "usage": {input_tokens, output_tokens, cache_*?}}`; `usage` yoksa **ölçülmedi** (sıfır değil) |
-| status / cancel | `<f> status\|cancel [id]` | desteklenmiyorsa çıkış 3; `adapter.sh` bunu "unsupported" diye bildirir |
-| usage | `adapter.sh usage <host>` | `none` / `declared`; sıfır uydurmaz |
-| evidence | `run-role.sh` → `parse-verdict.sh --record` | adaptörden bağımsız |
+| capabilities | `<f> capabilities` | JSON with exactly 8 keys (`noninteractive tool_use model_selection usage_reporting structured_output cancellation timeout cost_reporting`), values `help-verified\|declared\|estimated\|kit\|none` |
+| execute | `<f> execute --role R --cwd D --tier T --ro 0\|1 [--model M] --prompt-file P` | `{"result": text, "usage": {input_tokens, output_tokens, cache_*?}}`; without `usage` it is **not measured** (not zero) |
+| status / cancel | `<f> status\|cancel [id]` | exit 3 if unsupported; `adapter.sh` reports this as "unsupported" |
+| usage | `adapter.sh usage <host>` | `none` / `declared`; never invents zeros |
+| evidence | `run-role.sh` → `parse-verdict.sh --record` | independent of the adapter |
 
-`scripts/adapter.sh capabilities|usage|cancel|status|validate`. Yerleşik host'larda iptal yoktur (yalnız `timeout` komutu varsa süre sınırı); eşitlik taklit edilmez.
+`scripts/adapter.sh capabilities|usage|cancel|status|validate`. Built-in hosts have no cancel (only a time limit if the `timeout` command exists); parity is not faked.
 
-## LiteLLM / OpenAI uyumlu uç nokta (F13, varsayılan kapalı)
-`adapters.d/litellm.sh`: `POST <LITELLM_BASE_URL>/chat/completions`. **Yalnız metin**: araç yok, dosya erişimi yok; bu yüzden `verifier/reviewer/security-auditor` ve yazan roller reddedilir (bağımsız karar yapıştırılmış içeriğe dayanamaz). `LITELLM_EGRESS=allow` olmadan hiçbir şey gönderilmez (istem repo içeriği taşıyabilir); sunucu `LITELLM_ALLOW_HOSTS` listesinde olmalı (varsayılan yalnız localhost). Anahtar ortam değişkeninden okunur (`LITELLM_API_KEY_ENV`), curl'e **stdin** ile verilir, hata iletilerinden maskelenir. Sağlayıcı hataları çıkış 5. Kullanım yanıttaki `usage`'dan; yoksa ölçülmedi. Model başına atıf `--model` ile kullanım defterine yazılır.
-Claude abonelik trafiği LiteLLM'den **geçmez**. **FusionCLI için adaptör yok**: komut yüzeyi buradan doğrulanamadı; gerçek `--help` ile yazılmalı. Testler sahte `curl` kullanır (`tests/litellm.test.sh`); canlı uç noktaya karşı denenmedi.
+## LiteLLM / OpenAI-compatible endpoint (F13, off by default)
+`adapters.d/litellm.sh`: `POST <LITELLM_BASE_URL>/chat/completions`. **Text only**: no tools, no file access; for this reason `verifier/reviewer/security-auditor` and writing roles are refused (an independent decision cannot rest on pasted content). Nothing is sent without `LITELLM_EGRESS=allow` (the prompt may carry repo content); the server must be in the `LITELLM_ALLOW_HOSTS` list (default: localhost only). The key is read from an environment variable (`LITELLM_API_KEY_ENV`), passed to curl via **stdin**, and masked in error messages. Provider errors exit 5. Usage comes from the response's `usage`; if absent, it is not measured. Per-model attribution is written to the usage ledger via `--model`.
+Claude subscription traffic does **not** go through LiteLLM. **There is no adapter for FusionCLI**: its command surface could not be verified from here; it must be written against the real `--help`. Tests use a fake `curl` (`tests/litellm.test.sh`); not tried against a live endpoint.

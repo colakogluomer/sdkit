@@ -1,5 +1,7 @@
 # spec-driven-kit: server-side gate. Fails a pull request whose code change has no committed attestation for exactly that diff
 # (and, for medium/high risk, no independent verifier PASS). Local hooks can be skipped with --no-verify; this cannot.
+# The gate runs the base branch's own sdd.sh (and reads the base branch's settings), so a pull request cannot edit the check that judges it.
+# Protect __KIT_DIR__/ and this CI file with CODEOWNERS: the attestation is a committed file, it proves the flow ran for this diff, not who ran it.
 # Keep your own build/test jobs in other workflows. Mark this check as required in the branch protection rules.
 name: spec-driven gate
 on:
@@ -13,4 +15,10 @@ jobs:
           fetch-depth: 0
           # the PR branch itself, not the synthetic merge commit: the attestation is bound to the branch's own content
           ref: ${{ github.event.pull_request.head.sha }}
-      - run: VERIFY_BASE="origin/${{ github.base_ref }}" bash __KIT_DIR__/scripts/sdd.sh ci-check
+      - env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          gate="$(mktemp -d)"; mkdir -p "$gate/scripts"
+          if git cat-file -e "$BASE:__KIT_DIR__/scripts/sdd.sh" 2>/dev/null; then for f in sdd.sh env.sh resolve-base.sh; do git show "$BASE:__KIT_DIR__/scripts/$f" > "$gate/scripts/$f" 2>/dev/null || rm -f "$gate/scripts/$f"; done
+          else echo "first adoption: the base branch has no gate yet, running this branch's"; cp __KIT_DIR__/scripts/sdd.sh __KIT_DIR__/scripts/env.sh __KIT_DIR__/scripts/resolve-base.sh "$gate/scripts/"; fi
+          VERIFY_BASE="$BASE" CLAUDE_PROJECT_DIR="$PWD" bash "$gate/scripts/sdd.sh" ci-check

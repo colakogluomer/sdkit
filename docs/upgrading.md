@@ -1,57 +1,57 @@
-# Projeleri güncelleme
+# Upgrading projects
 
-Kit iki yerde yaşar, ikisi ayrı güncellenir.
+The kit lives in two places, and each is updated separately.
 
-| Parça | Nerede | Nasıl güncellenir |
+| Part | Where | How it is updated |
 |---|---|---|
-| **Plugin tarafı** (skill, rol, hook, script) | Claude Code'un plugin önbelleği | Kit repo'sunda sürüm artar ve değişiklik marketplace kaynağına (kit'in git remote'u) ulaşır; projede plugin yenilenir |
-| **Proje tarafı** (`<project-dir>`: `project.md`, `project.env`, `rules/`, ...) | Projenin kendi repo'su | `bin/upgrade.sh`: yeni dosyaları ekler, sizin dosyalarınıza dokunmaz |
+| **Plugin side** (skills, roles, hooks, scripts) | Claude Code's plugin cache | The version is bumped in the kit repo and the change reaches the marketplace source (the kit's git remote); the plugin is refreshed in the project |
+| **Project side** (`<project-dir>`: `project.md`, `project.env`, `rules/`, ...) | The project's own repo | `bin/upgrade.sh`: adds new files, does not touch your files |
 
-## Adımlar (Claude Code, plugin modu)
+## Steps (Claude Code, plugin mode)
 
-1. **Kit'te yayın:** değişiklikler kit'in marketplace'in baktığı dala (varsayılan branch) girmiş ve `plugin.json` + `marketplace.json` sürümü artmış olmalı. Sürüm artmadan Claude Code yeni sürümü görmez.
-2. **Projede plugin'i yenile:** Claude Code'da `/plugin` ile `spec-driven-kit` marketplace'ini güncelle, sonra plugin'i güncelle; sonra Claude Code'u (oturumu) yeniden başlat. Komut adları sürüme göre değişebilir, `/plugin` menüsü her zaman çalışır.
-3. **Proje tarafını yükselt:** kit'in bir checkout'undan
+1. **Release in the kit:** the changes must have landed on the branch the kit's marketplace watches (the default branch) and the `plugin.json` + `marketplace.json` version must have been bumped. Without a version bump Claude Code does not see the new version.
+2. **Refresh the plugin in the project:** in Claude Code, update the `spec-driven-kit` marketplace with `/plugin`, then update the plugin; then restart Claude Code (the session). Command names may change between versions; the `/plugin` menu always works.
+3. **Upgrade the project side:** from a checkout of the kit
    ```bash
-   <kit>/bin/upgrade.sh /yol/proje
+   <kit>/bin/upgrade.sh /path/to/project
    ```
-   Host, mod ve stack'i kendisi bulur. Yeni dosyaları (ör. `rules/test-first.md`) ekler, `.gitignore`'a eksik satırları ekler, copy modunda `sync.sh` çalıştırır, en sonda `doctor.sh` çalıştırır.
-4. Aşağıdaki "sürüme göre elle yapılacaklar"a bak, `git diff` ile gözden geçir, commit'le.
+   It finds the host, mode and stack by itself. It adds new files (e.g. `rules/test-first.md`), adds missing lines to `.gitignore`, runs `sync.sh` in copy mode, and runs `doctor.sh` at the end.
+4. Check "Manual steps per version" below, review with `git diff`, commit.
 
-Güncel olup olmadığını görmek için: `<project-dir>/.scaffold-version` projenin son yükseltildiği kit sürümüdür; plugin tarafı sürümü `/plugin` menüsünde görünür.
+To see whether you are up to date: `<project-dir>/.scaffold-version` is the kit version the project was last upgraded to; the plugin side's version is shown in the `/plugin` menu.
 
-Copy modu ve Claude dışı hostlar (Codex, OpenCode, Cursor, Gemini): plugin yoktur; 3. adım yeterlidir (`sync.sh` yönetilen dosyaları günceller, yerel düzenlediklerinde çakışmayı farkla gösterir).
+Copy mode and non-Claude hosts (Codex, OpenCode, Cursor, Gemini): there is no plugin; step 3 is enough (`sync.sh` updates the managed files and shows a diff for conflicts where you edited them locally).
 
-Birden çok proje: her biri için `upgrade.sh` bir kez çalıştırılır. Toplu yapmak için:
+Several projects: run `upgrade.sh` once for each. To do it in bulk:
 ```bash
-for p in ~/code/projeA ~/code/projeB; do <kit>/bin/upgrade.sh "$p"; done
+for p in ~/code/projectA ~/code/projectB; do <kit>/bin/upgrade.sh "$p"; done
 ```
 
-## Sürüme göre elle yapılacaklar
+## Manual steps per version
 
 ### 0.3 → 0.4
-`upgrade.sh` şunları kendisi yapar: yeni dosyaları ekler (yeni script ve hook'lar, `verifier-deep` rol dosyası, yeni stack betikleri), `.gitignore`'a eksik satırları ekler, yönetilen kopyaları `sync.sh` ile günceller (copy modu ve Claude dışı hostlar). Sizde kalanlar:
+`upgrade.sh` does the following by itself: adds new files (new scripts and hooks, the `verifier-deep` role file, new stack scripts), adds missing lines to `.gitignore`, updates the managed copies with `sync.sh` (copy mode and non-Claude hosts). What is left to you:
 
-- **Copy modunda Claude projeleri:** yeni hook'ları kendi `.claude/settings.json`'ınıza birleştirin (dosya proje dosyasıdır, ezilmez; örnek: kit'teki `templates/settings.copy.json`). `guard-readonly`: `PreToolUse`, matcher `Bash|Edit|Write|NotebookEdit`. `usage-log`: `Stop` ve `SubagentStop`. Plugin modunda bunlar plugin ile gelir.
-- **`.verify-cache/`:** verify artık yeşil sonucu aynı ağaç için önbellekler. `<project-dir>/.gitignore`'a `.verify-cache/` eklenir (`upgrade.sh` şablondaki eksik satırları ekler); yoksa elle ekleyin.
-- **Yeni `project.env` anahtarları isteğe bağlıdır** (`USAGE_LOG`, `RUN_ROLE_HOST`, `VERIFIER_HOST`, `RUN_ROLE_MODEL_*`, `NODE_PM`, `VERIFY_BUILD`, `JAVA_BUILD_TOOL`, `EXTRA_REVIEW_SKILLS`). Boş = kapalı. Dosya sizindir, ezilmez; açıklamalar için `templates/project.env`'e bakın.
-- **DoD satırı biçimi:** `check-plan-parity.sh` plan, `proposal.md` ve `tasks.md` eşitliğini betikle denetler. DoD maddelerini `D<n>: metin | Verified by: tür` biçiminde yazın; eski serbest biçimli maddelerde betik madde bulamaz (çıkış 2).
-- **`high` riskte** doğrulayıcı artık `verifier-deep`'tir (strong katman, kit tarafında üretilir); ek ayar gerekmez. Başka bir sağlayıcıdan doğrulatmak için `VERIFIER_HOST` ayarlayın (`scripts/run-role.sh`).
-- **Stack betikleri:** `verify.sh` artık ince bir giriş; mantık `steps.sh` (stack) ve `scripts/verify-core.sh` (ortak) içinde. Hepsi yönetilen dosyadır, `sync.sh` günceller. Kopyalanmış `verify.sh`'ı özelleştirdiyseniz `sync.sh` ÇAKIŞMA gösterir: özelleştirmeyi `verify.d/` politikasına veya `VERIFY_CMD`'ye taşıyıp yeni dosyayı alın.
-- **Kullanım kaydı kapalıdır:** token defteri için `project.env`'e `USAGE_LOG=1` yazın; rapor `scripts/usage.sh report`.
-- **Yeni davranışlar:** görev durumu `work/<slug>/state.json`'da tutulur (devam etme, tek otomatik yeniden deneme); verifier çıktısı `parse-verdict.sh` ile doğrulanır; paralel görevlerde `writes:` kapsamı `check-writes.sh` ile denetlenir; handoff'a `WORKTREE:` eklenir. Rollerde salt okunur kısıt artık her hostta uygulanır.
-- **Kit bakımcıları:** `bin/build-adapters.sh --check` ve `tests/run.sh` çalıştırın; projeler için gerekmez.
-- **Yeni host eklemek isterseniz:** `<kit>/bin/init.sh --host <host> /yol/proje` (ör. `opencode`, `cursor`, `gemini`); proje klasörü adı değişmez (var olan korunur).
+- **Claude projects in copy mode:** merge the new hooks into your own `.claude/settings.json` (it is a project file and is not overwritten; example: `templates/settings.copy.json` in the kit). `guard-readonly`: `PreToolUse`, matcher `Bash|Edit|Write|NotebookEdit`. `usage-log`: `Stop` and `SubagentStop`. In plugin mode these come with the plugin.
+- **`.verify-cache/`:** verify now caches a green result for the same tree. `.verify-cache/` is added to `<project-dir>/.gitignore` (`upgrade.sh` adds the lines missing from the template); if not, add it by hand.
+- **New `project.env` keys are optional** (`USAGE_LOG`, `RUN_ROLE_HOST`, `VERIFIER_HOST`, `RUN_ROLE_MODEL_*`, `NODE_PM`, `VERIFY_BUILD`, `JAVA_BUILD_TOOL`, `EXTRA_REVIEW_SKILLS`). Empty = off. The file is yours and is not overwritten; see `templates/project.env` for descriptions.
+- **DoD line format:** `check-plan-parity.sh` checks plan, `proposal.md` and `tasks.md` parity with a script. Write DoD items in the form `D<n>: text | Verified by: type`; in old free-form items the script finds no items (exit 2).
+- **At `high` risk** the verifier is now `verifier-deep` (strong tier, generated on the kit side); no extra setting needed. To have another provider verify, set `VERIFIER_HOST` (`scripts/run-role.sh`).
+- **Stack scripts:** `verify.sh` is now a thin entry point; the logic is in `steps.sh` (stack) and `scripts/verify-core.sh` (shared). All are managed files, `sync.sh` updates them. If you customized a copied `verify.sh`, `sync.sh` shows a CONFLICT: move the customization into a `verify.d/` policy or `VERIFY_CMD` and take the new file.
+- **Usage logging is off:** for the token ledger write `USAGE_LOG=1` in `project.env`; report with `scripts/usage.sh report`.
+- **New behaviour:** task state is kept in `work/<slug>/state.json` (resuming, single automatic retry); verifier output is validated with `parse-verdict.sh`; in parallel tasks the `writes:` scope is checked with `check-writes.sh`; `WORKTREE:` is added to the handoff. The read-only restriction on roles is now enforced on every host.
+- **Kit maintainers:** run `bin/build-adapters.sh --check` and `tests/run.sh`; not needed for projects.
+- **If you want to add a new host:** `<kit>/bin/init.sh --host <host> /path/to/project` (e.g. `opencode`, `cursor`, `gemini`); the project dir name does not change (the existing one is kept).
 
 ### 0.2.x → 0.3.0
-`upgrade.sh` şunları kendisi yapar: `rules/test-first.md` ve `rules/token-economy.md` eklenir, `.gitignore`'a `work/` eklenir. Sizde kalanlar:
+`upgrade.sh` does the following by itself: adds `rules/test-first.md` and `rules/token-economy.md`, adds `work/` to `.gitignore`. What is left to you:
 
-- **`CLAUDE.md` haritası** (`.claude/CLAUDE.md`): proje dosyasıdır, ezilmez. Yeni rolleri ve plan kapısını anlatan güncel metin için `templates/CLAUDE.md`'ye bakıp isteğinize göre birleştirin. Zorunlu değil; skill'ler kendi akışını taşır.
-- **`project.md`'de rubrik** zorunlu olmaya devam eder; yeni bir alan yoktur. Test düzeni bölümünü doldurun: plan kapısı "Verified by" için buraya bakar.
-- **Davranış değişiklikleri:** `spec-driven-dev` artık `propose`'dan önce plan kapısında sizi detaylıca sorgular; `analyst` rolü görevi inceler; `medium`/`high`'da DoD maddeleri "Verified by" taşımak zorundadır. Mevcut açık `openspec` change'lerinizi etkilemez.
-- **Yeni roller** (`analyst`, `scout`, `engineer`, `developer`, `devsecops`) plugin ile gelir; ek ayar gerekmez. Model seviyeleri `core/tiers.env`'de (kit tarafında) tanımlıdır.
-- **Proje klasörü adı** eski projelerde `.claude` olarak kalır; kit onu adıyla bulur. Taşımak zorunda değilsiniz.
-- **Codex'e geçmek isterseniz:** `<kit>/bin/init.sh --host claude,codex /yol/proje` yeni dosyaları (`AGENTS.md`, `.agents/`, `.codex/`, `.githooks/`) ekler; proje klasörü `.claude` olarak kalır (var olan korunur). Her klonda `git config core.hooksPath .githooks`.
+- **The `CLAUDE.md` map** (`.claude/CLAUDE.md`): it is a project file and is not overwritten. For the current text describing the new roles and the plan gate, look at `templates/CLAUDE.md` and merge as you like. Not mandatory; the skills carry their own flow.
+- **The rubric in `project.md`** stays mandatory; there is no new field. Fill in the test layout section: the plan gate looks there for "Verified by".
+- **Behaviour changes:** `spec-driven-dev` now questions you in detail at the plan gate before `propose`; the `analyst` role reviews the task; at `medium`/`high` DoD items must carry "Verified by". Your existing open `openspec` changes are not affected.
+- **New roles** (`analyst`, `scout`, `engineer`, `developer`, `devsecops`) come with the plugin; no extra setting needed. Model tiers are defined in `core/tiers.env` (on the kit side).
+- **The project dir name** stays `.claude` in old projects; the kit finds it by name. You do not have to move it.
+- **If you want to switch to Codex:** `<kit>/bin/init.sh --host claude,codex /path/to/project` adds the new files (`AGENTS.md`, `.agents/`, `.codex/`, `.githooks/`); the project dir stays `.claude` (the existing one is kept). In each clone, `git config core.hooksPath .githooks`.
 
 ## Shared files (AGENTS.md, CLAUDE.md, settings.json, hooks.json, config.toml)
 
@@ -61,7 +61,7 @@ From this version the kit writes only its own part of these files (a `spec-drive
 
 - Run `<kit>/bin/install.sh` once per machine so the git hooks find the kit in repos that carry no copy of the scripts.
 - `init.sh` now also copies `sdd.sh` and `resolve-base.sh` into `<project-dir>/scripts/` in every mode (CI runs them). `upgrade.sh` adds them and keeps them in sync.
-- Add the CI gate with `init.sh --ci bitbucket|github` (merge it into an existing pipeline file by hand), mark the check required, and protect `<project-dir>/attestations/` with code review.
+- Add the CI gate with `init.sh --ci bitbucket|github|gitlab` (merge it into an existing pipeline file by hand), mark the check required, and protect `<project-dir>/attestations/` with code review.
 - Tasks that finish `verified` now write `<project-dir>/attestations/<task>.json`; commit it with the change.
 - `sync.sh --check` fails on drift between the managed copies and the kit; `doctor.sh` reports drift, the CI gate and the machine registration.
 
@@ -117,9 +117,20 @@ This is a breaking change, so it targets 2.0.0 (the version files are not bumped
 ### Risk floor (optional, off by default)
 `RISK_FLOOR_GLOBS` in `sdkit.env` (empty after `sdkit upgrade` appends it, so nothing changes until you set it): `level:glob,level:glob`, e.g. `high:services/payments/*,medium:migrations/*.sql,medium:*/auth/*`. A task whose diff touches a matching file may not carry a lower risk label than the strictest matching level. The label stays the user's choice; the floor only stops it from being too low for what the diff really touches.
 - Checked by `sdd.sh advance green` and `advance verified` (strict refuses, guided warns, off ignores), on the files that really changed (the same set the fingerprint covers, untracked files included), and by `sdd.sh ci-check`, which recomputes the floor itself, ignores the attestation's `floor` field, and rejects an attestation whose `risk` is below it. A raised `risk` written by hand into an attestation still needs `verdict: PASS`.
-- CI also reads `RISK_FLOOR_GLOBS` and `SDD_MODE` from the **base branch's** committed `sdkit.env`: a pull request that empties the floor or sets `SDD_MODE=off` is still held to the base. A file matching a floor entry needs an attestation even where `SDD_FREE_GLOBS` or the docs globs would free it.
+- CI reads every setting, `RISK_FLOOR_GLOBS` and `SDD_MODE` included, from the **base branch's** committed `sdkit.env`: a pull request that empties the floor or sets `SDD_MODE=off` is still held to the base. A file matching a floor entry needs an attestation even where `SDD_FREE_GLOBS` or the docs globs would free it.
 - A malformed value fails closed: `sdd.sh start`, `ci-check` and `sdkit doctor` refuse it (`sdd.sh floor --validate` checks it). `sdd.sh floor` prints the floor of the current diff.
 - Limits: it constrains the label, it does not choose it, and a reviewer must still protect `sdkit.env` and `attestations/` (CODEOWNERS); an attestation whose JSON is forged outright (a `high` label with `PASS`) is the documented attestation limit. A personal `sdkit.local.env` can relax the local check, never CI. Putting a path under a floor changes the diff fingerprint (it edits `sdkit.env`), so attestations made before that need to be re-verified. Existing attestations without the `floor` field are still accepted.
+
+### Gate hardening (review findings)
+
+**Action:** re-run `sdkit init --ci <host>` (or copy the new job from `templates/ci/`) so CI runs the base branch's gate, and re-verify any task that was verified before the upgrade (the fingerprint format changed). Add CODEOWNERS for `.sdkit/` and the CI file.
+- **CI runs a trusted gate.** The shipped CI jobs take `sdd.sh`, `env.sh` and `resolve-base.sh` from the base branch, and `ci-check` reads **every** setting from the base branch's `sdkit.env` (a PR can add a stricter `RISK_FLOOR_GLOBS`, never loosen anything). `DIFF_BASE_CMD` is never run in CI, and `VERIFY_BASE` must come from the CI job's environment; a `VERIFY_BASE` in a settings file no longer counts there.
+- **`ci-check` fails closed.** An unknown base (shallow clone, wrong name), a diff that cannot be listed, or a missing hash tool is a FAIL, not "nothing to attest". An attestation with an empty or broken fingerprint never matches.
+- **Fingerprint.** Covers each path's mode as well as its content (a `chmod` counts), submodule commits, symlink targets and any file name (non-ASCII, quotes, spaces). It uses `shasum`, `sha256sum` or `openssl`, whichever exists. Existing attestations no longer match: re-verify open tasks.
+- **GREEN re-runs the RED command.** `advance green` always runs the command stored at `red`; a different `--test-cmd` is refused (`red --test-cmd false` then `green --test-cmd true` no longer passes).
+- **Paths are normalised** before the edit gate, `frozen-tests` and `guard-protected` match them: `docs/../src/x`, `./x` and `a//b` are judged as the file they name. Task slugs may only use letters, digits, `.`, `_` and `-`.
+- **guard-pr** refuses the hook-only subcommands anywhere in a command that runs the kit (`S=_evidence; sdd.sh $S ...`), skipping the git hooks (`--no-verify`, `core.hooksPath`, `SDD_SKIP=`, `GUARD_SKIP_VERIFY=`), `git` with options before `push` (`git -C . push`, `/usr/bin/git push`, `(git push)`) and `gh api .../pulls`. Still a speed bump, not a boundary.
+- The git pre-commit hook gates deletions too. `parse-verdict.sh` reads `*` and numbered bullets like `-` ones, and refuses `VERDICT: PASS` when a VERIFY command is red.
 
 ### Also in this release (no action needed)
 - Claude Code: the `SubagentStop` hook now validates the verifier's block with `parse-verdict.sh` and records only a well-formed one; a malformed or contradictory block is reported to the orchestrator and records nothing. The skill no longer tells Claude to pass `--record` (the `guard-pr` hook denied it there); other hosts still do, and `guard-pr` allows it for them.

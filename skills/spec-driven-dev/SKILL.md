@@ -111,7 +111,7 @@ A **second** `BLOCK` on the same task, whatever the cause, stops automatic retri
 
 `git push`, `gh pr create`, `glab mr create` and `open-pr.sh` are denied (hook) and blocked (git pre-push) unless the task is `verified` and the diff is unchanged since. After the PR is open: `<sdd> advance pr`.
 
-Per `rules/git.md` and the PR tooling in `project.md`: commit in the conventional format, push, and **open the PR yourself** (never hand it back as a to-do; the kit ships `scripts/open-pr.sh` for Bitbucket, other hosts in `docs/hosts.md`) against the merge target in `project.md`. State what changed, why, and how to test, plus the verification result (DoD PASS summary; for `high` the findings with verdicts) and the last `<verify>` output. Relay the post-merge steps from `project.md`'s release flow to the user; do not run them.
+Per `rules/git.md` and the PR tooling in `project.md`: commit in the conventional format, push, and **open the PR yourself** (never hand it back as a to-do; the kit ships `scripts/open-pr.sh` for Bitbucket, GitHub and GitLab, see `docs/hosts.md`) against the merge target in `project.md`. State what changed, why, and how to test, plus the verification result (DoD PASS summary; for `high` the findings with verdicts) and the last `<verify>` output. Relay the post-merge steps from `project.md`'s release flow to the user; do not run them.
 
 ## 8. Closeout
 

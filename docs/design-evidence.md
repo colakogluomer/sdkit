@@ -1,102 +1,102 @@
-# Kanıt bütünlüğü ve yüksek risk zorlaması (F04)
+# Evidence integrity and high-risk enforcement (F04)
 
-F03'ün bilinen sınırları: yüksek riskte `reviewer` ve `security-auditor` yalnızca istemdeydi; kanıtın bayatlığı yalnızca doğrulayıcı için izleniyordu; `parse-verdict.sh --record` herkesin elle çağırabileceği bir yoldu. F04 bunları **kodla** kapatır, ek LLM çağrısı olmadan.
+Known limits of F03: at high risk, `reviewer` and `security-auditor` existed only in the prompt; evidence staleness was tracked only for the verifier; `parse-verdict.sh --record` was a path anyone could call by hand. F04 closes these **in code**, with no extra LLM call.
 
-## 1. Ne zorlanır
+## 1. What is enforced
 
-| Risk / profil | `verified` | `pr` | `done` |
+| Risk / profile | `verified` | `pr` | `done` |
 |---|---|---|---|
-| low, standard / small | verify komutu (değişmedi) | – | – |
-| medium | bağımsız verifier PASS, bu diff için (değişmedi) | – | – |
-| low + high-assurance | verifier PASS (değişmedi) | – | – |
-| **high** (her profil) | verifier **+ reviewer + security-auditor**, her biri *kayıtlı bir ajan çalışmasından* PASS, bu görev, bu diff | kanıt hâlâ bu diff için geçerli | kanıt, doğrulanan parmak iziyle (`verifiedFingerprint`) hâlâ geçerli ve sonradan gelen BLOCK yok |
+| low, standard / small | verify command (unchanged) | – | – |
+| medium | independent verifier PASS, for this diff (unchanged) | – | – |
+| low + high-assurance | verifier PASS (unchanged) | – | – |
+| **high** (any profile) | verifier **+ reviewer + security-auditor**, each a PASS from *a registered agent run*, this task, this diff | evidence still valid for this diff | evidence still valid against the verified fingerprint (`verifiedFingerprint`), and no later BLOCK |
 
-Politikanın tek yeri `scripts/workflow.sh evidence-roles`; kapıyı `scripts/sdd.sh` uygular (`SDD_MODE`'dan bağımsız, doğrulayıcı kapısı gibi). Risk tabanı (`RISK_FLOOR_GLOBS`) etiketi yükseltir, yükselen etiket bu tabloya girer; hafif profil seçmek kapıyı düşürmez.
+The policy lives in one place, `scripts/workflow.sh evidence-roles`; `scripts/sdd.sh` applies the gate (independent of `SDD_MODE`, like the verifier gate). The risk floor (`RISK_FLOOR_GLOBS`) raises the label, and the raised label enters this table; choosing a light profile does not lower the gate.
 
-## 2. Kanıt kaydı
+## 2. Evidence record
 
-`.sdkit/.sdd/state.json` içinde (yeni dosya yok):
+In `.sdkit/.sdd/state.json` (no new file):
 
-- `evidence.<rol>` = `{result, fingerprint, task, trust, source, run, at, seq}` — rol başına **son** kayıt geçerlidir; daha yeni BLOCK eski PASS'i her zaman ezer.
-- `spawns[]` = başlatılmış ama henüz kaydı alınmamış ajan çalışmaları `{role, source, run, fp, at}` (en çok 16).
-- `evidenceLog[]` = her deneme (kabul/ret ve nedeni; en çok 40). Denetim içindir.
-- `evseq` = kabul edilen her kanıtta artan sayaç (eşzamanlılık koruması).
-- `verdict` = eski alan; verifier kanıtıyla birlikte yazılır (geri uyum).
+- `evidence.<role>` = `{result, fingerprint, task, trust, source, run, at, seq}` — the **last** record per role is the valid one; a newer BLOCK always overrides an older PASS.
+- `spawns[]` = agent runs that have started but not yet been recorded `{role, source, run, fp, at}` (at most 16).
+- `evidenceLog[]` = every attempt (accepted/refused and why; at most 40). For auditing.
+- `evseq` = a counter incremented on every accepted piece of evidence (concurrency guard).
+- `verdict` = legacy field; written together with the verifier evidence (backward compatibility).
 
-Geçerlilik durumu (`sdd.sh evidence [--json]`): `valid | missing | block | wrong-task | untrusted | stale | conflict`. Bayat bir PASS hiçbir kapıyı sessizce geçemez; yeniden doğrulama görevi sıfırlamaz: roller yeniden çalıştırılır, yeni kayıt eskisinin yerine geçer.
+Validity state (`sdd.sh evidence [--json]`): `valid | missing | block | wrong-task | untrusted | stale | conflict`. A stale PASS can never silently pass a gate; re-verification does not reset the task: the roles run again, and the new record replaces the old one.
 
-## 3. Güven: kimlik nasıl kurulur
+## 3. Trust: how identity is established
 
-Ajanın yazdığı metin **güvenilmez girdidir**; rol adı çıktıdaki bir satır değildir. Güvenilir kayıt (`trust=spawned`) yalnızca şöyle oluşur:
+Text the agent writes is **untrusted input**; the role name is not a line in the output. A trusted record (`trust=spawned`) is created only like this:
 
-1. Çalışma **başlarken** yürütme sınırı kaydı açar: `sdd.sh _spawn <rol>` (Claude Code: `guard-budget.sh`, `PreToolUse` Agent; diğer host'lar: `run-role.sh` kendi süreci için, benzersiz `--run` kimliğiyle). Kayıt o anki diff parmak iziyle bağlanır.
-2. Çalışma **biterken** kaydı o sınır yapar: Claude Code `record-verdict.sh` (`SubagentStop`, host'un `agent_id`'si), diğerlerinde `run-role.sh` sürecin sonunda `parse-verdict.sh --role <rol> --record --source run-role --run <id>`.
-3. `sdd.sh _evidence` kaydı yalnızca açık bir kaydı **tüketerek** güvenilir sayar: aynı rol, aynı kaynak, aynı diff (aksi: `stale-at-record`, çalışma sırasında kod değişmişse), bir kayıt yalnızca bir kez.
+1. When the run **starts**, the execution boundary opens a registration: `sdd.sh _spawn <role>` (Claude Code: `guard-budget.sh`, `PreToolUse` Agent; other hosts: `run-role.sh` for its own process, with a unique `--run` ID). The registration is bound to the diff fingerprint at that moment.
+2. When the run **ends**, that same boundary makes the record: on Claude Code `record-verdict.sh` (`SubagentStop`, the host's `agent_id`), elsewhere `run-role.sh` at the end of the process with `parse-verdict.sh --role <role> --record --source run-role --run <id>`.
+3. `sdd.sh _evidence` counts a record as trusted only by **consuming** an open registration: same role, same source, same diff (otherwise `stale-at-record`, if the code changed during the run), and each registration only once.
 
-Sonuçlar: elle kayıt (`manual`) saklanır ama yüksek riskte kapıyı açmaz; kayıtsız bir host olayı `unregistered` olur; kayıtlı olmayan bir `run-role` iddiası **reddedilir** (`unknown-run`); aynı kimlik iki rolde kullanılamaz (`role-conflict`); aynı kimlikle ikinci gönderim reddedilir (`duplicate`); başka görev adına gönderim reddedilir (`task-mismatch`); görev bittikten sonra gelen kanıt reddedilir (durum dosyası yok, çıkış 4). Elle kaydedilen bir PASS, aynı diff için güvenilir PASS'in yerine geçmez; elle kaydedilen BLOCK her zaman geçer (güvenli yön).
+Consequences: a hand record (`manual`) is kept but does not open the gate at high risk; a host event without a registration becomes `unregistered`; an unregistered `run-role` claim is **refused** (`unknown-run`); the same ID cannot be used for two roles (`role-conflict`); a second submission with the same ID is refused (`duplicate`); a submission in another task's name is refused (`task-mismatch`); evidence arriving after the task has ended is refused (no state file, exit 4). A hand-recorded PASS does not replace a trusted PASS for the same diff; a hand-recorded BLOCK always counts (the safe direction).
 
-Claude Code'da `guard-pr.sh` model kabuğundan `sdd.sh _evidence|_spawn|_verdict`, `record-verdict.sh`, `guard-budget.sh` ve `.sdd/` erişimini reddeder.
+On Claude Code, `guard-pr.sh` refuses `sdd.sh _evidence|_spawn|_verdict`, `record-verdict.sh`, `guard-budget.sh` and access to `.sdd/` from the model's shell.
 
-`run-role.sh` reviewer/security-auditor için kayıt ve biçim denetimini yalnızca risk `high` iken yapar (düşük riskte cevapları serbest biçimde kalır; verifier her riskte kayıt alır). `bench/run.sh` simülasyonu artık doğrulayıcı verdict'ini `run-role.sh`'tan alır (ikinci elle kayıt yok) ve high-independent-verify senaryosu üç rolü de çalıştırır: **yüksek riskte simüle ajan sayısı 2 artar** (reviewer + security-auditor; bunlar SKILL.md'de zaten vardı, simülasyon modellemiyordu).
+`run-role.sh` does the registration and format checks for reviewer/security-auditor only when the risk is `high` (at lower risk their answers stay free-form; the verifier is registered at every risk). The `bench/run.sh` simulation now takes the verifier verdict from `run-role.sh` (no second hand record), and the high-independent-verify scenario runs all three roles: **at high risk the simulated agent count goes up by 2** (reviewer + security-auditor; these were already in SKILL.md, but the simulation did not model them).
 
-Kesilen çalışma: `run-role.sh` host sürecinin hata kodunu döndürür, kaydı bırakır (`_spawn-close`), kanıt yazmaz. Biçimi bozuk ya da `sdd.sh`'ın reddettiği cevap çıkış 6 verir, kanıt yazmaz.
+Interrupted run: `run-role.sh` returns the host process's error code, releases the registration (`_spawn-close`) and writes no evidence. A malformed answer, or one `sdd.sh` refuses, exits 6 and writes no evidence.
 
-## 4. Roller ve biçim
+## 4. Roles and format
 
-`reviewer` ve `security-auditor` çıktılarına iki satır eklendi (`SUMMARY` sayıları ve `VERDICT: PASS|BLOCK`). `parse-verdict.sh --role` bunları doğrular: bulgu satırı sayıları SUMMARY ile eşleşmeli, tam bir `VERDICT`, reviewer'da BLOCKER → BLOCK, auditor'da CRITICAL/HIGH → BLOCK, bulgu yoksa `NO FINDINGS`. LLM çağrısı yoktur.
+Two lines were added to the `reviewer` and `security-auditor` outputs (`SUMMARY` counts and `VERDICT: PASS|BLOCK`). `parse-verdict.sh --role` validates them: the finding line counts must match SUMMARY, there must be a complete `VERDICT`, BLOCKER → BLOCK for the reviewer, CRITICAL/HIGH → BLOCK for the auditor, and `NO FINDINGS` if there are no findings. There is no LLM call.
 
-## 5. Atomiklik ve eşzamanlılık
+## 5. Atomicity and concurrency
 
-Tüm yazımlar `sdkit_lock` altındaki tek `put` ile yapılır (oku-değiştir-yaz). Faz geçişi `testCmd`/`verifiedFingerprint` yazımını faz hareketiyle **aynı** yazıma katar: reddedilen ya da yarışı kaybeden bir `advance` durumu değiştirmez. Attestation, hareket başarılı olduktan sonra yazılır. `verified|pr|done` hareketi, hükmünü verdiği kanıttan sonra yeni kanıt geldiyse reddedilir (`concurrent`, `evseq`).
+All writes go through a single `put` under `sdkit_lock` (read-modify-write). A phase transition folds the `testCmd`/`verifiedFingerprint` write into the **same** write as the phase move: an `advance` that is refused or loses a race does not change the state. The attestation is written after the move succeeds. A `verified|pr|done` move is refused if new evidence arrived after the evidence it decided on (`concurrent`, `evseq`).
 
-## 6. Host yetenek matrisi (`workflow.sh capabilities`)
+## 6. Host capability matrix (`workflow.sh capabilities`)
 
-| Yol | Başlatmada sözleşme | Verdict ayrıştırma | Güvenilir kimlik | Kanıt kaydı | Bayat tespiti | Tamamlama kapısı | Hata bildirimi |
+| Path | Contract at spawn | Verdict parsing | Trusted identity | Evidence record | Staleness detection | Completion gate | Error reporting |
 |---|---|---|---|---|---|---|---|
-| Claude Code (hook'lar) | sorar (`PreToolUse` Agent, yalnızca `CONTRACTS=1`/high-assurance) | otomatik (`SubagentStop`) | host `agent_id` + kayıt | otomatik | zorlanır | zorlanır (`sdd.sh advance`) | orkestratöre `systemMessage` |
-| `run-role.sh` (her host) | zorlanır (çıkış 2, süreç başlamaz) | otomatik (süreç bitince) | süreç sahipli kimlik + kayıt | otomatik | zorlanır | zorlanır | çıkış 3/4/5/6 + stderr |
-| Host'un kendi alt ajanları (Codex, OpenCode, Cursor, Gemini) | **yok** | elle (`parse-verdict.sh --record`) | **yok**: `manual`, yüksek riskte reddedilir | elle | advance'te tespit | zorlanır | advance'te ret |
-| Git hook'ları / CI | yok | yok | attestation incelemesi | attestation'dan | `ci-check` | `ci-check` | CI günlüğü |
+| Claude Code (hooks) | asks (`PreToolUse` Agent, only with `CONTRACTS=1`/high-assurance) | automatic (`SubagentStop`) | host `agent_id` + registration | automatic | enforced | enforced (`sdd.sh advance`) | `systemMessage` to the orchestrator |
+| `run-role.sh` (any host) | enforced (exit 2, the process does not start) | automatic (when the process ends) | process-owned ID + registration | automatic | enforced | enforced | exit 3/4/5/6 + stderr |
+| The host's own subagents (Codex, OpenCode, Cursor, Gemini) | **none** | by hand (`parse-verdict.sh --record`) | **none**: `manual`, refused at high risk | by hand | detected at advance | enforced | refusal at advance |
+| Git hooks / CI | none | none | attestation review | from the attestation | `ci-check` | `ci-check` | CI log |
 
-Matrisin iddiaları `tests/evidence.test.sh` ile gönderilen dosyalara karşı sınanır (ör. Claude dışındaki hiçbir adaptör `SubagentStop`/`guard-budget` bağlamaz). Host'un kendi alt ajanlarında yürütme kimliği kurulamaz; yüksek riskte kapı orada **kapalı kalır**: o host'ta üç rol `run-role.sh` ile çalıştırılmalıdır.
+`tests/evidence.test.sh` tests the matrix's claims against the shipped files (e.g. no adapter other than Claude's wires `SubagentStop`/`guard-budget`). In the host's own subagents an execution identity cannot be established; at high risk the gate **stays closed** there: on that host the three roles must be run with `run-role.sh`.
 
 ## 7. CI
 
-`ci-check`, risk `high` olan attestation'da üç rolün `PASS`, `trust=spawned` ve CI'ın yeniden hesapladığı parmak iziyle eşleşen kaydını arar (attestation `evidence` alanını taşır). F04 öncesi yüksek riskli attestation'lar bu alanı taşımaz: yeni diff için görev yeniden doğrulanmalıdır.
+On an attestation with risk `high`, `ci-check` looks for a record of each of the three roles with `PASS`, `trust=spawned` and a fingerprint matching the one CI recomputes (the attestation carries an `evidence` field). High-risk attestations from before F04 do not carry this field: for a new diff, the task must be verified again.
 
-## 8. Sınırlar (kabul edilen)
+## 8. Limits (accepted)
 
-- **Aynı kullanıcıyla kabuk erişimi olan bir süreç her yerel dosyayı, `state.json` dahil, taklit edebilir.** F04 kazara ve istem düzeyindeki öz-onayı (ajanın "PASS" yazması, `--record` çağırması, başka görevin kanıtını yeniden kullanması, bayat PASS) engeller; kararlı bir saldırganı yerelde engelleyemez. `guard-pr.sh` bir düzenli ifadedir (örn. değişkenle dolaylı çağrı onu atlatır). Arka plan güvencesi: CI `ci-check` + `<project-dir>/attestations/` için CODEOWNERS incelemesi; elle yazılmış bir attestation'ı CI da ayırt edemez.
-- Claude Code `SubagentStop` yükündeki `agent_id` alanı bu depodaki hook'ların varsayımına dayanır; **canlı oturumda koşturulmadı**. Alan yoksa kayıt `manual` olur ve yüksek riskte kapı kapalı kalır (güvenli yön).
-- `run-role.sh` bayrakları canlı CLI'lara karşı doğrulanmadı (F02'den beri).
-- Bir ajanın cevabının *doğru* olduğu doğrulanmaz; yalnızca biçimi, görevi, rolü, yürütme kaydını ve diff'i. İçerik kalitesi rolün işidir.
-- Paralel aynı rol çalışmaları aynı diff'te kayıt paylaşır; aralarında düzenleme olursa güvenli yönde reddedilir.
+- **A process with shell access as the same user can forge any local file, `state.json` included.** F04 prevents accidental and prompt-level self-approval (the agent writing "PASS", calling `--record`, reusing another task's evidence, a stale PASS); it cannot stop a determined attacker locally. `guard-pr.sh` is a regular expression (e.g. an indirect call through a variable bypasses it). Backstop: CI `ci-check` + CODEOWNERS review for `<project-dir>/attestations/`; CI cannot tell a hand-written attestation apart either.
+- The `agent_id` field in the Claude Code `SubagentStop` payload relies on the assumption made by the hooks in this repo; **not run in a live session**. If the field is absent, the record becomes `manual` and the gate stays closed at high risk (the safe direction).
+- The `run-role.sh` flags are not verified against live CLIs (since F02).
+- Whether an agent's answer is *correct* is not verified; only its format, task, role, execution registration and diff are. Content quality is the role's job.
+- Parallel runs of the same role on the same diff share a registration; if there is an edit between them, it is refused in the safe direction.
 
-- Kayıt (spawn) ajana değil role bağlıdır: `PreToolUse` anında `agent_id` yoktur. Bu yüzden bir rol için **eski diff'e ait** açık kayıt varken gelen kayıt reddedilir (`stale-at-record`, roller yeniden çalıştırılır); aynı diff'te hiç ajan başlamamış bir "hayalet" kaydı başka bir durak tüketebilir (kabul edilen sınır; `run-role.sh` yolunda kayıt `--run` kimliğiyle birebir eşleşir).
-- Bağımsız inceleme (F04 değerlendirmesi) `guard-pr.sh` düzenli ifadesinin değişkenle dolaylı çağrıyla (`S=…/sdd.sh; $S _evidence …`) atlatılabildiğini yeniden üretti: yerel kabuk erişimi olan süreç güvenilir kanıt üretebilir. CI/CODEOWNERS dışında yerel çözüm yoktur.
+- A registration (spawn) is tied to the role, not the agent: there is no `agent_id` at `PreToolUse` time. So when a role has an open registration **for an old diff**, an incoming record is refused (`stale-at-record`, the roles run again); a "ghost" registration on the same diff, for which no agent ever started, can be consumed by another stop event (accepted limit; on the `run-role.sh` path the registration matches the `--run` ID one to one).
+- An independent review (the F04 evaluation) reproduced that the `guard-pr.sh` regular expression can be bypassed by an indirect call through a variable (`S=…/sdd.sh; $S _evidence …`): a process with local shell access can produce trusted evidence. There is no local fix besides CI/CODEOWNERS.
 
-## 9. Maliyet
+## 9. Cost
 
-Düşük/orta riskte yeni zorunlu LLM çağrısı **yok**. Yüksek riskte `reviewer` ve `security-auditor` zaten SKILL.md §5'in parçasıydı; F04 onları atlanamaz yapar, çağrı eklemez; aynı diff için geçerli kanıt yeniden kullanılır, bayat olmayan rol yeniden çalıştırılmaz. Ek yük: `SKILL.md` +201 bayt, `reviewer` +94, `security-auditor` +176 bayt (yalnızca o roller çalışınca); bir bağımsız rol başlatmada bir `git` parmak izi + bir `jq` yazımı (küçük fikstürde ~0,3 sn); diğer ajan başlatmalarında hook'a ~70 ms. Gerçek token ölçümü yapılmadı.
+At low/medium risk there is **no** new mandatory LLM call. At high risk, `reviewer` and `security-auditor` were already part of SKILL.md §5; F04 makes them impossible to skip and adds no call; valid evidence for the same diff is reused, and a role whose evidence is not stale is not rerun. Overhead: `SKILL.md` +201 bytes, `reviewer` +94, `security-auditor` +176 bytes (only when those roles run); for an independent role spawn, one `git` fingerprint + one `jq` write (~0.3 s on a small fixture); ~70 ms in the hook for other agent spawns. No real token measurement was done.
 
-## 10. F04.1: çalışma zamanı güveni ve sertleştirme
+## 10. F04.1: runtime trust and hardening
 
-**Güven sınırı (iki kategori).** (A) Ajan çıktısı ve iş akışı komutlarıyla (kazara ya da istem düzeyinde) aşılabilenler: kod kapatır. (B) Aynı kullanıcı olarak keyfi kabuk/dosya yazımı gerektirenler: yerelde kapatılamaz; düzenli ifadeyle "kapatılmış" gösterilmez.
+**Trust boundary (two categories).** (A) What can be bypassed through agent output and workflow commands (accidentally or at prompt level): code closes it. (B) What needs arbitrary shell/file writes as the same user: cannot be closed locally, and is not presented as "closed" by a regex.
 
-Yeniden üretilen ve sonuçları (`tests/evidence.test.sh`, "F04.1" bloğu):
+Reproduced attempts and their results (`tests/evidence.test.sh`, "F04.1" block):
 
-| Deneme | Sonuç | Kategori |
+| Attempt | Result | Category |
 |---|---|---|
-| Kayıtsız `run-role` iddiası, uydurma `rr-…` kimliği | reddedilir (`unknown-run`) | A, kapalı |
-| `agent_id` var ama spawn kaydı yok / `agent_id` yok | `untrusted`, high'da `advance verified` reddeder | A, kapalı |
-| Aynı kimlik iki rolde; kimliğin yeniden kullanımı | `role-conflict` / `duplicate` | A, kapalı |
-| Başka göreve ait kanıt; bayat parmak izi; görev bittikten sonra kanıt | `wrong-task` / `stale` / çıkış 4 | A, kapalı |
-| Paralel kayıt ve paralel `advance verified` | `state.json` geçerli kalır, kayıt bir kez tüketilir | A, kapalı |
-| Spawn kaydı açık kalan, cevapsız biten (kesilen) ajan | **düzeltildi**: `record-verdict.sh` boş cevapta `_spawn-close --role` ile kaydı kapatır; öncesinde kayıt sonraki gerçek çalışmayı `stale-at-record` ile boşa harcatırdı | A, düzeltildi |
-| `Write`/`Edit` ile `.sdd/` ve `attestations/` | `guard-protected` reddeder | A, kapalı |
-| `sdd.sh "_evidence"` (tırnak), `S=…; $S _evidence` | `guard-pr.sh` geçirir | **B**, kabul |
-| `state.json`'u elle yazmak, sahte attestation | yerelde engellenemez; **sahte attestation `ci-check`'i geçer** (aynı diff için) | **B**, kabul |
+| Unregistered `run-role` claim, made-up `rr-…` ID | refused (`unknown-run`) | A, closed |
+| `agent_id` present but no spawn registration / no `agent_id` | `untrusted`; `advance verified` refuses at high | A, closed |
+| Same ID for two roles; reusing an ID | `role-conflict` / `duplicate` | A, closed |
+| Another task's evidence; stale fingerprint; evidence after the task ended | `wrong-task` / `stale` / exit 4 | A, closed |
+| Parallel recording and parallel `advance verified` | `state.json` stays valid, the registration is consumed once | A, closed |
+| An agent that ends without an answer (interrupted), leaving its spawn registration open | **fixed**: on an empty answer `record-verdict.sh` closes the registration with `_spawn-close --role`; before, the registration made the next real run go to waste with `stale-at-record` | A, fixed |
+| `.sdd/` and `attestations/` through `Write`/`Edit` | `guard-protected` refuses | A, closed |
+| `sdd.sh "_evidence"` (quoted), `S=…; $S _evidence` | `guard-pr.sh` lets it through | **B**, accepted |
+| Writing `state.json` by hand, a forged attestation | cannot be prevented locally; **a forged attestation passes `ci-check`** (for the same diff) | **B**, accepted |
 
-**CI gerçeği.** `ci-check` parmak izini, risk tabanını ve bayrakları CI'da yeniden hesaplar, ama rol kanıtını (`trust=spawned`) attestation dosyasından **okur**; LLM çalışmasını CI yeniden üretemez. Yani CI yerel olarak üretilmiş attestation'a *kısmen* güvenir: yalnızca dosyanın adı verdiği diff'i (herhangi bir sonraki düzenleme onu geçersiz kılar) doğrular. En küçük pratik önlem kod değil süreçtir: `<project-dir>/attestations/` için CODEOWNERS + zorunlu inceleme + korumalı dal; imzalama altyapısı bu tehdit modeli için gerekçelendirilmedi (imzalayan anahtar da aynı kullanıcının makinesinde olurdu). Daha güçlüsü gerekirse yüksek riskli PR'da reviewer/auditor'u CI'da `run-role.sh` ile yeniden çalıştırmak (ücretli, isteğe bağlı) tek gerçek bağımsız doğrulamadır.
+**The CI reality.** `ci-check` recomputes the fingerprint, the risk floor and the flags in CI, but it **reads** the role evidence (`trust=spawned`) from the attestation file; CI cannot reproduce the LLM run. So CI *partially* trusts a locally produced attestation: it only verifies the diff the file names (any later edit invalidates it). The smallest practical measure is process, not code: CODEOWNERS + mandatory review + a protected branch for `<project-dir>/attestations/`; signing infrastructure is not justified for this threat model (the signing key would also sit on the same user's machine). If something stronger is needed, rerunning reviewer/auditor in CI with `run-role.sh` on high-risk PRs (paid, optional) is the only truly independent verification.
 
-**Canlı Claude Code doğrulaması: UNVERIFIED.** Gerçek `Agent` çağrısı ücretli model çağrısı gerektirir; yetki yoktu. Yalnızca `claude` 2.1.316 ikilisinin şemasında `SubagentStop` girdisi için `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message` alanlarının tanımlı olduğu görüldü (statik kanıt). PreToolUse `Agent|Task` eşleşmesi `hooks.json`'da var. Diğer host CLI'ları (codex, opencode, cursor-agent, gemini) bu makinede kurulu değil: bayrakları doğrulanmadı.
+**Live Claude Code verification: UNVERIFIED.** A real `Agent` call needs a paid model call; there was no authorization for one. All that was observed is that the schema of the `claude` 2.1.316 binary defines the `agent_id`, `agent_type`, `agent_transcript_path` and `last_assistant_message` fields for `SubagentStop` input (static evidence). The PreToolUse `Agent|Task` matcher is in `hooks.json`. The other host CLIs (codex, opencode, cursor-agent, gemini) are not installed on this machine: their flags are unverified.

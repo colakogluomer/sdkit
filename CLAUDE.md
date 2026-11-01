@@ -3,7 +3,7 @@
 This repo is the kit itself: an agentic development kit (neutral roles and workflow, generated adapters for Claude Code, Codex, OpenCode, Cursor and Gemini CLI, hooks, git-hook guards, verify engine, stacks) plus tools that set up the project side
 (`<project-dir>` = `.sdkit/`, committed except its personal and generated files; plus `AGENTS.md`, the kit block in `.claude/CLAUDE.md`, and generated host files, hidden from git per clone) in other repos. It is not a consumer of the kit; nothing here is a project.
 
-Orientation: `README.md` (overview), `docs/guide.md` (full guide, Turkish), `CONTRIBUTING.md` (how to change the kit), `docs/README.md` (reading map).
+Orientation: `README.md` (overview), `docs/guide.md` (full guide), `CONTRIBUTING.md` (how to change the kit), `docs/README.md` (reading map).
 
 ## Rules for working here
 
@@ -25,7 +25,7 @@ Orientation: `README.md` (overview), `docs/guide.md` (full guide, Turkish), `CON
 - Keep the numbers and tables in sync in one change: skill/role/hook/script counts and the settings list appear in `README.md`, `core/roles/README.md`, `docs/guide.md`
   (§2, §6, §7, §10, §15) and `docs/cheatsheet.md`.
 - Version bumps go in **both** `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
-- Docs: `README.md` English and short; `docs/` Turkish; details live in `docs/guide.md` and other files link to it instead of repeating it.
+- Docs: `README.md` short; `docs/` English; details live in `docs/guide.md` and other files link to it instead of repeating it.
 - Commits follow `core/rules/git.md` (`<type>(<scope>): <description>`, imperative, ≤ 72 chars).
 
 ## Checking a change

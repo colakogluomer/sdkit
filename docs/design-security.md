@@ -1,13 +1,13 @@
-# Güvenlik sertleştirme (F19)
+# Security hardening (F19)
 
-Denetim, kitin **gerçekte zorladığı** şeyleri ayırır (hook/script kodu) ve yalnızca istemde yazılı olanları "zorlanmaz" sayar.
+The audit separates what the kit **actually enforces** (hook/script code) and counts only what is written in a prompt as "not enforced".
 
-| Alan | Zorlama | Nerede |
+| Area | Enforcement | Where |
 |---|---|---|
-| Salt-okunur roller | `agents/*.md` araç listesinde Edit/Write yok + `guard-readonly.sh` hook'u | `audit.sh policy` ikisini de denetler |
-| Gizli bilgi | `guard-secrets.sh`; görünümlerde `redact.sh` (özet/zarf çıktıları, hata iletileri, denetim değerleri) | tam metin diskte **değiştirilmez** (kanıt bütünlüğü) |
-| Sağlayıcıya veri çıkışı | `adapters.d/litellm.sh`: `LITELLM_EGRESS=allow`, ana makine izin listesi, metin-yalnız (bağımsız roller ve yazan roller reddedilir), anahtar stdin ile | denetim kaydı **önce** yazılır: kayıt yoksa istek yok |
-| Denetim izi | `<project-dir>/audit.jsonl`, hash zincirli, yalnız üst veri (tür, rol, ana makine, bayt); istem/cevap/içerik yok, değer >120 karakter reddedilir | `audit.sh verify` ortadaki düzenleme/silmeyi bulur; **kuyruğu kesmeyi engelleyemez** |
-| Harici adaptör | `adapters.d/*.sh` yazılabilir izinleri ve `capabilities` geçerliliği | `audit.sh policy` |
+| Read-only roles | no Edit/Write in the `agents/*.md` tool list + the `guard-readonly.sh` hook | `audit.sh policy` checks both |
+| Secrets | `guard-secrets.sh`; `redact.sh` in views (summary/envelope output, error messages, audit values) | full text on disk is **not modified** (evidence integrity) |
+| Data egress to a provider | `adapters.d/litellm.sh`: `LITELLM_EGRESS=allow`, host allow-list, text-only (independent and writing roles are refused), key via stdin | the audit record is written **first**: no record, no request |
+| Audit trail | `<project-dir>/audit.jsonl`, hash-chained, metadata only (kind, role, host, bytes); no prompt/answer/content, values over 120 characters are rejected | `audit.sh verify` finds edits/deletions in the middle; it **cannot prevent truncating the tail** |
+| External adapter | `adapters.d/*.sh` writable permissions and `capabilities` validity | `audit.sh policy` |
 
-`redact.sh` bilinen biçimlerle çalışır (AWS anahtar kimliği, GitHub/Slack token'ları, `sk-…`, JWT, Bearer, `password=`, özel anahtar blokları). Bilinmeyen biçim geçer: **garanti değil, filtre**. Sandbox/worktree sınırı için `check-writes.sh` ve `worktree.sh merge` değişmedi. Bu turda denetimde bulunan kritik açık yok; kendi eklediğim yol için (litellm adaptörü) anahtarın `ps`'te görünmemesi ve hata iletilerinden maskelenmesi testle sabitlendi. Canlı sağlayıcı ve canlı Claude hook yükü denenmedi. `tests/security.test.sh`.
+`redact.sh` works with known formats (AWS key id, GitHub/Slack tokens, `sk-…`, JWT, Bearer, `password=`, private key blocks). An unknown format passes through: **a filter, not a guarantee**. `check-writes.sh` and `worktree.sh merge` are unchanged for the sandbox/worktree boundary. No critical issue was found in the audit this round; for the path I added myself (the litellm adapter), the key not appearing in `ps` and being masked in error messages is pinned by a test. A live provider and live Claude hook payloads were not tried. `tests/security.test.sh`.

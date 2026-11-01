@@ -1,43 +1,43 @@
-# Deterministik iş akışı motoru (F03)
+# Deterministic workflow engine (F03)
 
-Durum: **uygulandı**, 1.1.0 üzerinde, F00/F00.5/F01/F02 değişikliklerinin üstüne; sürüm artırılmadı, commit yapılmadı. Bu belge F03'ün kapsamı, tasarımı, karar kayıtları ve doğrulama kaydıdır. Amaç: hangi iş akışının seçildiği, fazların nasıl geçildiği, ajan sözleşmesinin ne zaman şart olduğu ve hata/yeniden deneme davranışı **kodla** belirlensin, `SKILL.md`'yi okuyan modelin hatırlamasına bırakılmasın. Yeni bir orkestrasyon çatısı, ek ajan çağrısı ya da ikinci bir durum dosyası yoktur.
+Status: **implemented**, on 1.1.0, on top of the F00/F00.5/F01/F02 changes; version not bumped, nothing committed. This document is F03's scope, design, decision records and verification record. Goal: which workflow is chosen, how phases are passed, when an agent contract is required and the failure/retry behaviour are decided **by code**, not left to the memory of the model reading `SKILL.md`. There is no new orchestration framework, extra agent call or second state file.
 
-## 1. Mevcut durum: koda bağlı olanlar ve olmayanlar
+## 1. Current state: what is tied to code and what is not
 
-| Karar | F03 öncesi | F03 sonrası |
+| Decision | Before F03 | After F03 |
 |---|---|---|
-| Faz sırası, atlama yasağı | kodda (`sdd.sh`) | aynı; tablo `sdd.sh transitions` ile okunur, tek tanım `PHASES` |
-| RED (testler **düşmeli**), GREEN (**geçmeli**) | kodda | aynı |
-| `proposed` girişi: DoD listesi; high için yarış/sıralama bölümü | kodda | aynı |
-| Risk tabanı (`RISK_FLOOR_GLOBS`) | kodda | aynı |
-| medium/high için bağımsız doğrulayıcı PASS, diff parmak izine bağlı | kodda | aynı |
-| **Süreç ağırlığı (küçük / normal / sıkı)** | yalnızca `SKILL.md` düzyazısı ("küçük low görevleri kendin yapabilirsin") | `--profile`, görev durumunda sabit, kodda doğrulanır |
-| Sözleşme işaretini devire eklemek | yalnızca orkestratörün hatırlaması | `workflow.sh require`: Claude hook'u ve `run-role.sh` zorunlu olduğu yerde sorar/reddeder |
-| Cevapsız / yarım kalan ajan | düzyazı + `contract.sh pending` (kimse sormuyordu) | high-assurance'ta `green` ve `verified` kapısı |
-| Reddedilen geçişin **nedeni** | insan metni (stderr) | metin + `phase.reject` olayında `reason` |
-| `verified` sonrası eski kanıt | `gate push` reddeder ama "yeniden doğrula, `advance verified`" diyen mesaj **uygulanamazdı** (`verified→verified` reddediliyordu) | `verified`/`pr` → `verified` yeniden doğrulama, yalnızca kanıt bayatsa |
-| Aynı anda iki `advance` | okuma-kontrol-yazma kilitsizdi: ikisi de geçebilir, tarihçe iki kez yazılırdı | yazma kilit altında, faz hâlâ kontrol edilen fazsa geçer; biri kazanır |
-| Aynı anda iki `start` | ikisi de "açık görev yok" görebilirdi | kilit altında kontrol |
-| Yeniden deneme sınırı | `state.sh retry` (kodda) + "üçüncü döngü yok" (düzyazı) | aynı; BLOCK mesajı artık hakkın harcanıp harcanmadığını söyler |
-| Reviewer / security-auditor'ın çalıştırılması (high) | düzyazı | **hâlâ düzyazı** (bölüm 9, risk 1) |
+| Phase order, no skipping | in code (`sdd.sh`) | same; the table is read with `sdd.sh transitions`, single definition `PHASES` |
+| RED (tests **must fail**), GREEN (**must pass**) | in code | same |
+| `proposed` entry: DoD list; for high a race/ordering section | in code | same |
+| Risk floor (`RISK_FLOOR_GLOBS`) | in code | same |
+| Independent verifier PASS for medium/high, tied to the diff fingerprint | in code | same |
+| **Process weight (small / normal / strict)** | only `SKILL.md` prose ("you may do small low tasks yourself") | `--profile`, fixed in the task state, validated in code |
+| Adding the contract marker to a handoff | only the orchestrator's memory | `workflow.sh require`: the Claude hook and `run-role.sh` ask/refuse where it is required |
+| Unanswered / interrupted agent | prose + `contract.sh pending` (nobody asked) | `green` and `verified` gate in high-assurance |
+| The **reason** for a refused transition | human text (stderr) | text + `reason` in the `phase.reject` event |
+| Stale evidence after `verified` | `gate push` refuses, but the message saying "re-verify, `advance verified`" **could not be followed** (`verified→verified` was refused) | `verified`/`pr` → `verified` re-verification, only if the evidence is stale |
+| Two `advance`s at the same time | read-check-write had no lock: both could pass, history was written twice | the write is under a lock and passes only if the phase is still the checked phase; one wins |
+| Two `start`s at the same time | both could see "no open task" | check under a lock |
+| Retry limit | `state.sh retry` (in code) + "no third loop" (prose) | same; the BLOCK message now says whether the retry has been used |
+| Running reviewer / security-auditor (high) | prose | **still prose** (section 9, risk 1) |
 
-## 2. Profiller
+## 2. Profiles
 
-Profil **süreç ağırlığıdır**, risk **kapılardır**. Kullanıcı riski onaylar; profil onunla birlikte önerilir. İkisi de `sdd.sh start` ile yazılır ve görev boyunca değişmez (risk etiketi gibi): profil görev ortasında hafifletilemez.
+A profile is **process weight**, risk is **gates**. The user confirms the risk; the profile is proposed with it. Both are written by `sdd.sh start` and do not change during the task (like the risk label): a profile cannot be lightened mid-task.
 
-| Profil | Kural (kodda) | Ne zaman |
+| Profile | Rule (in code) | When |
 |---|---|---|
-| `small` | yalnızca `low`; `medium`/`high` ile `start` reddedilir. Sözleşme yükü yok (en fazla projenin `CONTRACTS=1`'i). Hiçbir zorunlu adım atlanmaz: RED/GREEN, risk tabanı, verify komutu aynen | tek dosyalık, düşük riskli iş |
-| `standard` (varsayılan) | bugünkü iş akışı, bit bit aynı. `--profile` verilmezse bu | çoğu görev |
-| `high-assurance` | her riskte `verified` bağımsız doğrulayıcı PASS ister (low dahil); yazan/karar veren roller (`developer test-writer devsecops engineer verifier reviewer security-auditor`) için sözleşme **zorunlu**; cevapsız ajan `green`/`verified`'ı engeller. `CONTRACTS` ayarı gerekmez | geri alınamaz, güvenlik/para/veri etkisi olan iş |
+| `small` | `low` only; `start` with `medium`/`high` is refused. No contract overhead (at most the project's `CONTRACTS=1`). No mandatory step is skipped: RED/GREEN, risk floor, verify command unchanged | single-file, low-risk work |
+| `standard` (default) | today's workflow, bit-for-bit identical. Used if `--profile` is not given | most tasks |
+| `high-assurance` | `verified` requires an independent verifier PASS at every risk (low included); contracts are **mandatory** for writing/deciding roles (`developer test-writer devsecops engineer verifier reviewer security-auditor`); an unanswered agent blocks `green`/`verified`. The `CONTRACTS` setting is not needed | irreversible work with security/money/data impact |
 
-Değişmezler (testle kanıtlı): `small` risk tabanını düşürmez (`RISK_FLOOR_GLOBS` yüksek yol → `green` reddedilir); `high` risk her profilde yarış/sıralama bölümünü ister; `high-assurance` hiçbir kapıyı kaldırmaz, yalnızca ekler; geçerli sözleşme `advance verified`'ı geçirmez. CI tarafı: `ci-check`, attestation'da `profile: high-assurance` varsa low riskte de PASS ister (attestation'ı yalnızca `sdd.sh` yazar).
+Invariants (proven by tests): `small` does not lower the risk floor (`RISK_FLOOR_GLOBS` high path → `green` refused); `high` risk requires the race/ordering section in every profile; `high-assurance` removes no gate, it only adds; a valid contract does not pass `advance verified`. CI side: `ci-check` requires a PASS even at low risk if the attestation has `profile: high-assurance` (only `sdd.sh` writes the attestation).
 
-**Neden `small` yalnızca bu kadar?** Dürüst değerlendirme: `low` akışı zaten hafif; `small`'ın kodda sağladığı iki şey (a) yanlış etiket koruması: `small` + medium/high imkânsız, (b) sözleşme yükünü kapatması. Plan kapısını ve analyst'i atlama gibi şeyler `SKILL.md`'nin "asla atlama" korumalarına aykırı olurdu; eklenmedi. Prompt düzeyinde `small` yalnızca "tek oturumda kendin yap" demektir (`references/workflow.md`).
+**Why is `small` only this much?** Honest assessment: the `low` flow is already light; the two things `small` provides in code are (a) protection against a wrong label: `small` + medium/high is impossible, (b) turning off the contract overhead. Things like skipping the plan gate and the analyst would go against the "never skip" guards in `SKILL.md`; they were not added. At prompt level `small` only means "do it yourself in a single session" (`references/workflow.md`).
 
-## 3. Geçiş politikası
+## 3. Transition policy
 
-Tek geçerli hareket bir sonraki fazdır; geri dönüş yalnızca `abort` (görevi bitirir). İstisna: **yeniden doğrulama** (`verified|pr → verified`), yalnızca `verifiedFingerprint` mevcut diff'le uyuşmuyorsa ve aynı kapılarla.
+The only valid move is to the next phase; going back is only `abort` (it ends the task). Exception: **re-verification** (`verified|pr → verified`), only if `verifiedFingerprint` does not match the current diff, and with the same gates.
 
 ```
 $ sdd.sh transitions
@@ -50,73 +50,73 @@ pr > done          none (the PR is merged: the user's call)
 verified|pr > verified  re-verification, only while the verified diff is stale: the same checks as verified
 any > (aborted)    sdd.sh abort; the only way back, and it ends the task
 ```
-`pr` girişine ek koşul **eklenmedi** (denendi): mevcut testler `verified`'dan sonra repoya takip edilmeyen dosya düşüren akışları `pr`'a taşıyordu; itme kapısı (`gate push`) zaten PR açılmadan önce diff'in doğrulanan diff olduğunu denetliyor. Geriye uyumluluk bu ek denetimin önüne alındı.
+No extra condition **was added** to the `pr` entry (it was tried): existing tests drove flows that drop an untracked file into the repo after `verified` through to `pr`; the push gate (`gate push`) already checks that the diff is the verified diff before a PR is opened. Backward compatibility was put ahead of this extra check.
 
-Reddedilen hareket: durum **değişmez**, stderr'e neden yazılır, `phase.reject` olayına `reason` düşer. Nedenler: `not-next unknown-phase no-artifact no-dod no-design tests-pass tests-fail verify-failed no-verdict verdict-block stale-verdict risk-floor agents-pending out-of-phase concurrent` (kategori: `tests` yalnızca test koşusundan gelen red için, gerisi `gate`). `phase.reject` yalnızca sabit kelimeler taşır: devir metni, test çıktısı, yol listesi yazılmaz.
+Refused move: the state **does not change**, the reason is written to stderr, and a `reason` lands in the `phase.reject` event. Reasons: `not-next unknown-phase no-artifact no-dod no-design tests-pass tests-fail verify-failed no-verdict verdict-block stale-verdict risk-floor agents-pending out-of-phase concurrent` (category: `tests` only for a refusal that comes from the test run, `gate` for the rest). `phase.reject` carries only fixed words: no handoff text, test output or path list is written.
 
-## 4. Sözleşme politikası (F02 ile bütünleşme)
+## 4. Contract policy (integration with F02)
 
-`workflow.sh contracts --role R` `off | optional | required` döndürür. Girdi: görevin profili, `CONTRACTS` ayarı, rol. Çalıştırma sınırı yalnızca *nasıl uygulandığını* belirler.
+`workflow.sh contracts --role R` returns `off | optional | required`. Input: the task's profile, the `CONTRACTS` setting, the role. The execution boundary only decides *how it is enforced*.
 
-| Profil | `CONTRACTS` boş | `CONTRACTS=1` |
+| Profile | `CONTRACTS` empty | `CONTRACTS=1` |
 |---|---|---|
-| (görev yok) | off | optional |
-| small | off | optional (asla required) |
-| standard | off | optional (F02 davranışı, eski devirler geçer) |
-| high-assurance | **required** (kit rolleri), optional (`scout`, `analyst`, kit dışı ajan) | aynı |
+| (no task) | off | optional |
+| small | off | optional (never required) |
+| standard | off | optional (F02 behaviour, old handoffs pass) |
+| high-assurance | **required** (kit roles), optional (`scout`, `analyst`, non-kit agent) | same |
 
-| Sınır | Uygulayan | Zorunlu ve işaret yoksa |
+| Boundary | Enforced by | If required and the marker is missing |
 |---|---|---|
-| Ajan aracı (Claude Code `PreToolUse` `Agent`) | `check-contract.sh` → `workflow.sh require` | `strict`: **ask**; `guided`: uyarı; `off`: sessiz. Hook'un kendi hatası asla bloklamaz |
-| Ayrı süreç (`run-role.sh`, tüm host'lar) | `run-role.sh` → `workflow.sh require` | `strict`: çıkış **2**, ajan başlamaz; `guided`: uyarı, çalışır |
-| Oturum içi (orkestratör kendisi yapıyor) | — | sınır yok, sözleşme yok |
-| Diğer host'ların hook'ları (Codex/OpenCode/Cursor/Gemini) | uygulanmaz | host'ta `Agent` benzeri PreToolUse doğrulanmadı (F02 §5 ile aynı). Karşılığı: `run-role.sh` ve `advance` kapıları (`agents-pending`) her host'ta aynı |
+| Agent tool (Claude Code `PreToolUse` `Agent`) | `check-contract.sh` → `workflow.sh require` | `strict`: **ask**; `guided`: warning; `off`: silent. The hook's own error never blocks |
+| Separate process (`run-role.sh`, all hosts) | `run-role.sh` → `workflow.sh require` | `strict`: exit **2**, the agent does not start; `guided`: warning, runs |
+| In-session (the orchestrator does it itself) | — | no boundary, no contract |
+| Other hosts' hooks (Codex/OpenCode/Cursor/Gemini) | not enforced | an `Agent`-like PreToolUse was not validated on the host (same as F02 §5). Counterpart: `run-role.sh` and the `advance` gates (`agents-pending`) are the same on every host |
 
-Host sınırları (incelendi): Claude'un `SubagentStop` hook'u bloklayamaz, yalnızca mesaj ekler; bu yüzden cevap tarafı hâlâ "bir kez bildir" davranışındadır ve hook hangi devre ait olduğunu bilmediği için `--legacy-ok` kalır. Zorunluluğun gerçek dişi **spawn öncesi** (ask/exit 2) ve **faz kapısıdır** (cevapsız ajan `green`/`verified`'ı durdurur). `workflow.sh` hiçbir şeyi yazmaz; `sdd.sh` bu dosyada geçen "sözleşme" kelimesini bilmez (test: `grep -i contract sdd.sh` boş): `sdd.sh` yalnızca "ajan havada mı?" sorusunu `workflow.sh gate`'e sorar, kapı yalnızca `high-assurance`'ta çağrılır.
+Host limits (examined): Claude's `SubagentStop` hook cannot block, it can only add a message; so the answer side still has "report once" behaviour, and since the hook does not know which handoff it belongs to, `--legacy-ok` stays. The real teeth of the requirement are **before spawn** (ask/exit 2) and the **phase gate** (an unanswered agent stops `green`/`verified`). `workflow.sh` writes nothing; `sdd.sh` does not know the word "contract" used in this file (test: `grep -i contract sdd.sh` is empty): `sdd.sh` only asks `workflow.sh gate` "is an agent in flight?", and the gate is only called in `high-assurance`.
 
-**Geçerli sözleşme doğrulamanın yerini tutmaz**: `verified` hâlâ yalnızca `record-verdict.sh`/`parse-verdict.sh`'ın yazdığı, mevcut diff'e bağlı PASS ile geçer. Test: high-assurance görevde geçerli, `done` bir verifier sözleşmesi kaydedilir; `advance verified` yine reddedilir, verdict kaydı yoktur.
+**A valid contract does not replace verification**: `verified` still only passes with a PASS written by `record-verdict.sh`/`parse-verdict.sh` and tied to the current diff. Test: in a high-assurance task a valid, `done` verifier contract is recorded; `advance verified` is still refused, there is no verdict record.
 
-Ek ajan çağrısı yok: politika betik kararıdır. Ek süreç: yalnızca high-assurance'ta (bölüm 8).
+No extra agent call: the policy is a script decision. Extra process: only in high-assurance (section 8).
 
-## 5. Hata ve kurtarma politikası
+## 5. Failure and recovery policy
 
-Mevcut `state.sh retry` (kimlik başına bir hak) ve `contract.sh close/pending` yeniden kullanıldı; yeni durum dosyası yok.
+The existing `state.sh retry` (one try per id) and `contract.sh close/pending` were reused; no new state file.
 
-| Durum | Davranış | Nerede |
+| Situation | Behaviour | Where |
 |---|---|---|
-| Geçersiz geçiş | reddedilir, durum aynı, neden `not-next`/`unknown-phase`; `abort` dışında geri yok | `sdd.sh` |
-| Eksik artefakt (proposal, design, `--test-cmd`) | reddedilir: `no-artifact`/`no-dod`/`no-design`; `verified` anında proposal kaybolduysa da `no-artifact` | `sdd.sh` |
-| Eksik/geçersiz sözleşme | zorunluysa spawn öncesi ask/exit 2; geçersiz cevap: `state.sh retry <id>` ile **bir** yeniden deneme, ikinci hata kullanıcıya | hook, `run-role.sh`, F02 |
-| Yarım kalan ajan | devir `issued` kalır → high-assurance'ta `green`/`verified` `agents-pending` ile durur; `contract.sh close <id> --reason interrupted` + tek yeniden deneme (`RETRY-OF:`) | `workflow.sh gate` |
-| Yeniden deneme sınırı | kimlik başına bir; ikinci BLOCK/hata otomatik döngüyü durdurur, kullanıcıya gider | `state.sh`, `references/workflow.md` |
-| Bloke doğrulama | `verified` `verdict-block` ile reddedilir; mesaj: hak harcanmadıysa tek yeniden deneme, harcandıysa "dur, kullanıcıya sor" | `sdd.sh` |
-| Bayat kanıt | verdict başka diff'e aitse `stale-verdict`; `verified`/`pr` sonrası düzenleme: `status` → `evidence=stale`, `gate push` reddeder, `advance verified` yeniden doğrulamaya izin verir | `sdd.sh` |
-| Eşzamanlı durum değişikliği | `start`: kilitli kontrol; `advance`: yazma anında faz karşılaştırılır (`concurrent`) | `sdd.sh` |
+| Invalid transition | refused, state unchanged, reason `not-next`/`unknown-phase`; no way back except `abort` | `sdd.sh` |
+| Missing artifact (proposal, design, `--test-cmd`) | refused: `no-artifact`/`no-dod`/`no-design`; also `no-artifact` if the proposal disappeared at the moment of `verified` | `sdd.sh` |
+| Missing/invalid contract | if required, ask/exit 2 before spawn; invalid answer: **one** retry with `state.sh retry <id>`, the second failure goes to the user | hook, `run-role.sh`, F02 |
+| Interrupted agent | the handoff stays `issued` → in high-assurance `green`/`verified` stop with `agents-pending`; `contract.sh close <id> --reason interrupted` + single retry (`RETRY-OF:`) | `workflow.sh gate` |
+| Retry limit | one per id; a second BLOCK/failure stops the automatic loop and goes to the user | `state.sh`, `references/workflow.md` |
+| Blocked verification | `verified` is refused with `verdict-block`; message: single retry if the try is unused, "stop, ask the user" if it is used | `sdd.sh` |
+| Stale evidence | `stale-verdict` if the verdict belongs to another diff; edit after `verified`/`pr`: `status` → `evidence=stale`, `gate push` refuses, `advance verified` allows re-verification | `sdd.sh` |
+| Concurrent state change | `start`: locked check; `advance`: the phase is compared at write time (`concurrent`) | `sdd.sh` |
 
-Kapsam dışı (F04): kontrol noktası/devam (resume) yeniden tasarımı. Burada yalnızca mevcut `state.sh`/`sdd.sh status` kullanıldı.
+Out of scope (F04): redesign of checkpoint/resume. Only the existing `state.sh`/`sdd.sh status` were used here.
 
-## 6. Telemetri (F01 defterine ek, ikinci defter yok)
+## 6. Telemetry (an addition to the F01 ledger, no second ledger)
 
-| Olay / alan | Ne zaman |
+| Event / field | When |
 |---|---|
-| `task.start` + `profile` | profil seçimi (her görev; yeni olay yok, varsayılan akışta olay sayısı değişmez) |
-| `workflow.decision` (`source=contract-policy`, `outcome=required|optional`, `profile`) | yalnızca profil `standard` değilse, görev başında bir kez |
-| `workflow.decision` (`outcome=missing-marker`, `role`, `note=boundary=agent|process`, `reason=missing-field`) | zorunlu sözleşmesi olan devirde işaret yoksa |
-| `phase.enter` | her geçiş (değişmedi) |
-| `phase.reject` + `reason` (+ `category`, `phase`, `source`) | her reddedilen geçiş ve kapı |
-| `retry`, `failure` (`verdict-block`, `contract`, ...) | `state.sh`, F02 (değişmedi) |
+| `task.start` + `profile` | profile choice (every task; no new event, the event count in the default flow is unchanged) |
+| `workflow.decision` (`source=contract-policy`, `outcome=required|optional`, `profile`) | only if the profile is not `standard`, once at the start of the task |
+| `workflow.decision` (`outcome=missing-marker`, `role`, `note=boundary=agent|process`, `reason=missing-field`) | if a handoff with a required contract has no marker |
+| `phase.enter` | every transition (unchanged) |
+| `phase.reject` + `reason` (+ `category`, `phase`, `source`) | every refused transition and gate |
+| `retry`, `failure` (`verdict-block`, `contract`, ...) | `state.sh`, F02 (unchanged) |
 
-`telemetry.sh summary` çıktısına `workflow` bölümü eklendi: profil, kararlar, `rejections_by_reason`. `validate` bilinmeyen profil ve nedeni reddeder. Hassas veri yok: alanlar sabit sözlük kelimeleri ve kimliktir.
+A `workflow` section was added to the `telemetry.sh summary` output: profile, decisions, `rejections_by_reason`. `validate` rejects an unknown profile and reason. No sensitive data: the fields are fixed vocabulary words and ids.
 
-## 7. Testler (`tests/workflow.test.sh`)
+## 7. Tests (`tests/workflow.test.sh`)
 
-135 durum, hepsi geçti: geçiş tablosu ve **her fazdan** her geçersiz hedef (durum değişmez), her geçerli geçiş, neden kodları, `start` doğrulaması; risk × profil etkileşimi (small + medium/high reddi, risk tabanı, high-assurance low, high'ın tasarım şartı); bağımsız doğrulama kapıları (no-verdict / BLOCK / bayat / yeniden doğrulama, attestation ve `ci-check`); rol × profil × `CONTRACTS` matrisi, hook (ask/guided/off, scout, kit dışı ajan, geçerli/geçersiz devir), `run-role.sh --dry-run` (exit 2 / uyarı / eski davranış); geçerli sözleşmenin doğrulamayı geçirmemesi; yarım kalan ajan (`agents-pending`, `close`, tek yeniden deneme, standard'da engellemez); eşzamanlılık (4 eş zamanlı `start` → 1, 6 eş zamanlı `advance` → 1 olay, `_verdict` kaybolmaz); telemetri; eski durum dosyası (profilsiz) ve `workflow.sh`'siz kısmi kurulum.
+135 cases, all passed: the transition table and every invalid target **from every phase** (state unchanged), every valid transition, reason codes, `start` validation; risk × profile interaction (small + medium/high refusal, risk floor, high-assurance low, high's design requirement); independent verification gates (no-verdict / BLOCK / stale / re-verification, attestation and `ci-check`); role × profile × `CONTRACTS` matrix, hook (ask/guided/off, scout, non-kit agent, valid/invalid handoff), `run-role.sh --dry-run` (exit 2 / warning / old behaviour); a valid contract not passing verification; interrupted agent (`agents-pending`, `close`, single retry, does not block in standard); concurrency (4 simultaneous `start`s → 1, 6 simultaneous `advance`s → 1 event, `_verdict` is not lost); telemetry; old state file (no profile) and partial install without `workflow.sh`.
 
-Çalıştırılan: `tests/run.sh`, `sdd`, `shared`, `sdkit-dir`, `risk-floor`, `hardening`, `budget`, `memory`, `telemetry`, `contract`, `workflow` paketleri ve `bin/build-adapters.sh --check`: hepsi geçti: run.sh 109, budget 45, contract 197, hardening 53, memory 38, risk-floor 76, sdd 52, sdkit-dir 64, shared 29, telemetry 118, workflow 135; adapter tutarlılığı güncel.
+Run: the `tests/run.sh`, `sdd`, `shared`, `sdkit-dir`, `risk-floor`, `hardening`, `budget`, `memory`, `telemetry`, `contract`, `workflow` suites and `bin/build-adapters.sh --check`: all passed: run.sh 109, budget 45, contract 197, hardening 53, memory 38, risk-floor 76, sdd 52, sdkit-dir 64, shared 29, telemetry 118, workflow 135; adapter consistency up to date.
 
 ## 8. Benchmark
 
-`bench/run.sh workflow` (yeni; F01 fikstürleri, simüle, ücretli LLM çağrısı yok) her senaryoyu iki kez koşar: `standard` ve `high-assurance` + sözleşmeli devirler. Betik başlatmaları `BASH_ENV` sayacıyla (`bench/call-counter.sh`) betik adına göre sayılır (alt kabuklar ve `jq`/`git` sayılmaz).
+`bench/run.sh workflow` (new; F01 fixtures, simulated, no paid LLM call) runs each scenario twice: `standard` and `high-assurance` + contracted handoffs. Script launches are counted by script name with a `BASH_ENV` counter (`bench/call-counter.sh`) (subshells and `jq`/`git` are not counted).
 
 ```
 scenario                   variant         result   events launches  wf.sh ctr.sh tele.sh sdd.sh
@@ -129,25 +129,25 @@ medium-multi-file          high-assurance  done         20       64      3      
 multi-agent-handoff        standard        done         25       86      0      0     53      8
 multi-agent-handoff        high-assurance  done         40      120      3     16     68      8
 ```
-Okuma:
-- **Mevcut senaryolarla uyum / varsayılan yol:** `standard` koşuların olay sayıları F02 öncesi/sonrası taban çizgisiyle aynıdır (24/13/15/25, F02 `overhead` tablosu) ve `workflow.sh` hiç çağrılmaz (0). Varsayılan yoldaki F03 eklentileri betik başlatması eklemez: kilit (`mkdir`), yazmada faz karşılaştırması (aynı `jq` çağrısı içinde), `reason` alanı (aynı olay). 4 senaryonun hepsi `done`'a ulaşır.
-- **Ek iş yükü, yalnızca high-assurance:** görev başına **3** `workflow.sh` başlatması (bir `announce`, `green` ve `verified` kapıları), +1 `workflow.decision` olayı. Geri kalan fark (olay +5…+15, `contract.sh` 4…16 çağrı) F02'nin sözleşme maliyetidir, F03'ün değil; high-assurance bunu *zorunlu* kıldığı için bu senaryolarda görünür.
-- `low-single-file` high-assurance'ta **reddedilir**: senaryoda doğrulayıcı adımı yok, `verified` `no-verdict` ile durur. Bu hata değil, tasarlanan davranıştır (bağımsız doğrulama low'da bile zorunlu).
-- Taban çizgisi sınırı: F03 öncesi kodu ayrıca koşturacak bir kopya tutulmadı; karşılaştırma F02'nin kayıtlı olay sayılarına ve "varsayılan yolda `workflow.sh` çağrısı 0" ölçümüne dayanır. Süre (wall) ölçümü gürültülü olduğundan raporlanmadı. Token/maliyet iddiası yok; `--real` koşusu yapılmadı (onay gerekir).
+Reading:
+- **Fit with existing scenarios / default path:** the event counts of the `standard` runs match the pre/post-F02 baseline (24/13/15/25, F02 `overhead` table) and `workflow.sh` is never called (0). The F03 additions on the default path add no script launches: the lock (`mkdir`), the phase comparison at write time (inside the same `jq` call), the `reason` field (same event). All 4 scenarios reach `done`.
+- **Extra workload, high-assurance only:** **3** `workflow.sh` launches per task (one `announce`, the `green` and `verified` gates), +1 `workflow.decision` event. The rest of the difference (events +5…+15, `contract.sh` 4…16 calls) is F02's contract cost, not F03's; it shows in these scenarios because high-assurance makes it *mandatory*.
+- `low-single-file` is **refused** in high-assurance: the scenario has no verifier step, `verified` stops with `no-verdict`. This is not a bug, it is the designed behaviour (independent verification is mandatory even at low).
+- Baseline limit: no copy of the pre-F03 code was kept to run separately; the comparison relies on F02's recorded event counts and on the measurement "0 `workflow.sh` calls on the default path". Wall-clock duration was not reported because it is noisy. No token/cost claim; no `--real` run was done (needs approval).
 
 
-## 9. Kalan riskler
+## 9. Remaining risks
 
-1. **Reviewer/security-auditor çalıştırıldı mı?** high riskte hâlâ düzyazı: bu rollerin sonuçları durum dosyasında kayıtlı değil, `verified` kapısı onları aramıyor. Kayıt (ör. verifier hook'una benzer bir `record-review`) ve high-assurance'ta zorunluluğu F04 adayıdır.
-2. **Profil seçimi insan/orkestratör kararıdır.** Kod, seçilen profilin altına inmeyi engeller ama "bu iş high-assurance olmalıydı" sonucunu çıkarmaz. Projeler `RISK_FLOOR_GLOBS` ile riski yola bağlayabilir; profili yola bağlayan bir taban eklenmedi (karmaşıklık). Bir ekip için sabit varsayılan profil ayarı (`SDD_PROFILE`) yok: `small` varsayılan olsaydı medium görevler start'ta düşerdi.
-3. **Diğer host'larda spawn öncesi uygulama yok** (Codex/OpenCode/Cursor/Gemini hook'ları doğrulanmadı); `run-role.sh` ve faz kapıları dışında zorunluluk yalnızca düzyazıdır.
-4. **`SubagentStop` bloklayamaz**: zorunlu sözleşme tarafında cevap eksikliği orkestratöre bildirilir, durdurulmaz; durdurma `agents-pending` kapısındadır ve yalnızca devir kayıtlıysa vardır.
-5. **`pr` girişi**: ek koşul yok (bölüm 3); `done` girişi kullanıcıya bırakıldı.
-6. Benchmark simülasyondur: token ve maliyet iddiası yok; gerçek koşu (`--real`) çalıştırılmadı, onay gerekir.
+1. **Were reviewer/security-auditor run?** At high risk this is still prose: the results of these roles are not recorded in the state file, and the `verified` gate does not look for them. A record (e.g. a `record-review` similar to the verifier hook) and making it mandatory in high-assurance are F04 candidates.
+2. **Profile choice is a human/orchestrator decision.** The code prevents going below the chosen profile but does not conclude "this work should have been high-assurance". Projects can tie risk to paths with `RISK_FLOOR_GLOBS`; a floor tying the profile to paths was not added (complexity). There is no fixed default profile setting for a team (`SDD_PROFILE`): if `small` were the default, medium tasks would fail at start.
+3. **No pre-spawn enforcement on other hosts** (Codex/OpenCode/Cursor/Gemini hooks not validated); outside `run-role.sh` and the phase gates the requirement is prose only.
+4. **`SubagentStop` cannot block**: on the required-contract side a missing answer is reported to the orchestrator, not stopped; stopping happens at the `agents-pending` gate and only exists if the handoff is recorded.
+5. **`pr` entry**: no extra condition (section 3); the `done` entry is left to the user.
+6. The benchmark is a simulation: no token or cost claim; a real run (`--real`) was not done, it needs approval.
 
-## 10. F04 için öneriler
+## 10. Recommendations for F04
 
-- Reviewer/security-auditor sonuçlarını `sdd.sh` durumuna kaydeden ve high riskte `verified`'dan önce arayan bir kayıt (bölüm 9, risk 1).
-- Kontrol noktası/devam: `state.sh` (`work/<slug>/state.json`) ile `sdd.sh` (`.sdd/state.json`) iki dosya; devam tek `resume` komutunda (`sdd.sh status` + `contract.sh pending` + `state.sh show`) birleştirilebilir. Bu belge ikisini birleştirmedi.
-- `workflow.sh policy --json` çıktısını SessionStart bağlamına (`session-context.sh`) eklemek: model her oturumda kuralı okumak yerine koddan alır (bir süreç ve ~200 bayt).
-- Profili yola/etikete bağlayan isteğe bağlı taban (`PROFILE_FLOOR_GLOBS`), yalnızca gerçek bir ihtiyaç doğarsa.
+- A record that stores reviewer/security-auditor results in the `sdd.sh` state and looks for them before `verified` at high risk (section 9, risk 1).
+- Checkpoint/resume: `state.sh` (`work/<slug>/state.json`) and `sdd.sh` (`.sdd/state.json`) are two files; resume could be combined into a single `resume` command (`sdd.sh status` + `contract.sh pending` + `state.sh show`). This document did not merge them.
+- Adding the `workflow.sh policy --json` output to the SessionStart context (`session-context.sh`): the model takes the rule from code instead of reading it every session (one process and ~200 bytes).
+- An optional floor tying the profile to a path/label (`PROFILE_FLOOR_GLOBS`), only if a real need arises.

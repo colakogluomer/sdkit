@@ -1,128 +1,128 @@
-# Tasarım: `.sdkit/` tek proje dizini
+# Design: `.sdkit/` as the single project directory
 
-Durum: **uygulandı, 1.1.0** (1.0.0 + ortak/kişisel ayar ayrımı, §9). Aşağıdaki kararlar kodda; sapmalar §9'da. Kullanıcıya dönük anlatım: `guide.md` §3 ve §15, geçiş: `upgrading.md` (1.0.0).
+Status: **implemented, 1.1.0** (1.0.0 + the shared/personal settings split, §9). The decisions below are in the code; deviations are in §9. User-facing description: `guide.md` §3 and §15; migration: `upgrading.md` (1.0.0).
 
-## 1. İlke
+## 1. Principles
 
-1. **`.sdkit/` kitin tek proje dizinidir ve repoya girer; içeriği herkeste aynıdır.** Projeyle ilgili ortak her şey orada durur: kurallar, pitfall'lar, ADR'ler, doğrulama politikaları, proje belleği.
-2. **Yalnızca kişiye özel olanlar girmez** (`.sdkit/.gitignore` ile): `sdkit.local.env` (bütçeler, limitler, memory davranışı ve host/model seçimi kişiden kişiye değişir), `work/` (görev durumu, defter, geçici bellek) ve çalışma zamanı dosyaları.
-3. **Host dizinlerinde (`.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.opencode/`) yalnızca en temel `.md` giriş dosyaları repoya girer** (`CLAUDE.md`, `AGENTS.md`).
-   Kitin oraya ürettiği geri kalan her şey (kurallar kopyası, hook, rol, ayar, bağlantı) repoya girmez: `sdkit init` onu herkeste aynı üretir, üretmiyorsa da aynıdır, commit'lemenin değeri yoktur.
-4. **Güncellemelerin hedefi hep `.sdkit/`'tir.** Ajan bir pitfall, karar ya da bellek girdisi eklerken `.sdkit/` altındaki dosyaya yazar; host dizinindeki hiçbir dosyaya değil.
-5. Hedef: desteklenen her aracı temel seviyede desteklemek. Aynı projede kimi geliştirici Claude, kimi Codex kullanabilir; ortak içerik araçtan bağımsız `.sdkit/`'te durur, her araç ona kendi yoluyla bağlanır.
+1. **`.sdkit/` is the kit's single project directory and is committed; its contents are identical for everyone.** Everything shared about the project lives there: rules, pitfalls, ADRs, verification policies, project memory.
+2. **Only what is personal stays out** (via `.sdkit/.gitignore`): `sdkit.local.env` (budgets, limits, memory behaviour and host/model choice differ from person to person), `work/` (task state, ledger, temporary memory) and runtime files.
+3. **In the host directories (`.claude/`, `.codex/`, `.cursor/`, `.gemini/`, `.opencode/`) only the most basic `.md` entry files are committed** (`CLAUDE.md`, `AGENTS.md`).
+   Everything else the kit generates there (rules copy, hooks, roles, settings, links) is not committed: `sdkit init` generates it identically for everyone, and where it does not generate it, it is identical anyway; there is no value in committing it.
+4. **Updates always target `.sdkit/`.** When an agent adds a pitfall, decision or memory entry it writes to the file under `.sdkit/`, never to any file in a host directory.
+5. Goal: support every supported tool at a basic level. In the same project some developers may use Claude, others Codex; shared content lives in the tool-independent `.sdkit/`, and each tool connects to it in its own way.
 
-## 2. Sorun (neden değişiyor)
+## 2. Problem (why this changes)
 
-- Bugün kit dosyaları host'un kendi dizinine yazılır ve projenin kendi içeriğiyle karışır; kaldırmak için `.scaffold-manifest` ile ayıklanır.
-- Dizin adı kuruluma göre değişir (`.claude`, `.codex`, `.agentkit`), bu yüzden 12 script bir çözücü döngüsü taşır ve belgeler `<project-dir>` der.
-- Bağlayıcı içerik host dizinine bağlı: Codex kullanan biri `.claude/project.md`'yi bilemez.
-- `project.env` hem proje gerçeklerini hem kişisel ayarları taşır; var olan dosyaya yeni anahtar eklenemediği için eski kurulumlar yeni ayarlardan habersiz kalır.
+- Today the kit's files are written into the host's own directory and mix with the project's own content; removing them means picking them out with `.scaffold-manifest`.
+- The directory name varies by install (`.claude`, `.codex`, `.agentkit`), so 12 scripts carry a resolver loop and the docs say `<project-dir>`.
+- Binding content is tied to the host directory: someone using Codex cannot know about `.claude/project.md`.
+- `project.env` holds both project facts and personal settings; since new keys cannot be added to an existing file, old installs stay unaware of new settings.
 
-## 3. Düzen
+## 3. Layout
 
 ```
 <repo>/
-├── AGENTS.md                tüm araçlar için giriş: kısa harita + kit bloğu          (repoda)
-├── CLAUDE.md  (.claude/CLAUDE.md)  Claude için giriş: aynı kit bloğu               (repoda)
-├── .sdkit/                                                                            (repoda, ayrıca aşağıdaki hariçler)
-│   ├── .gitignore           aşağıdaki kişisel dosyaları gizler; kökteki *.env kuralını sdkit.env için ayrıca ele alır
-│   ├── project.md           risk ölçeği, release akışı, PR/test düzeni
-│   ├── rules/               projeye özgü kurallar (kitin varsayılanları kitten gelir, buraya kopyalanmaz)
+├── AGENTS.md                entry for all tools: short map + kit block              (committed)
+├── CLAUDE.md  (.claude/CLAUDE.md)  entry for Claude: the same kit block             (committed)
+├── .sdkit/                                                                            (committed, except the exclusions below)
+│   ├── .gitignore           hides the personal files below; handles a root *.env rule separately for sdkit.env
+│   ├── project.md           risk scale, release flow, PR/test layout
+│   ├── rules/               project-specific rules (the kit's defaults come from the kit and are not copied here)
 │   ├── known-pitfalls.md    adr/    verify.d/    roles.d/
-│   ├── memory/              kalıcı proje belleği: INDEX.md + girdiler (fact, howto, decision)
+│   ├── memory/              durable project memory: INDEX.md + entries (fact, howto, decision)
 │   │
-│   ├── sdkit.env            EKİBİN ortak ayarları (git'te): STACK, release akışı, korunan yollar/branch'ler, prod cluster, secret kalıpları ...
-│   ├── sdkit.local.env      KİŞİSEL (ignore, sdkit.env'den sonra okunur): bütçeler, limitler, MAX_PARALLEL, memory davranışı, host/model seçimi
-│   ├── work/                KİŞİSEL (ignore): görev durumu, plan, notlar (geçici bellek), token defteri, scout önbelleği
-│   └── scripts/ hooks/ roles/ tiers.env  .frozen  .verify-cache/  .sdd/      ÜRETİLMİŞ (ignore): kurulumdan yeniden üretilir
-└── .claude/ .codex/ .cursor/ .gemini/ .opencode/ .githooks/    kitin yazdığı her şey ÜRETİLMİŞ (yerel ignore); projenin kendi dosyaları ne ise o
+│   ├── sdkit.env            the TEAM's shared settings (in git): STACK, release flow, protected paths/branches, prod cluster, secret patterns ...
+│   ├── sdkit.local.env      PERSONAL (ignored, read after sdkit.env): budgets, limits, MAX_PARALLEL, memory behaviour, host/model choice
+│   ├── work/                PERSONAL (ignored): task state, plan, notes (temporary memory), token ledger, scout cache
+│   └── scripts/ hooks/ roles/ tiers.env  .frozen  .verify-cache/  .sdd/      GENERATED (ignored): regenerated by install
+└── .claude/ .codex/ .cursor/ .gemini/ .opencode/ .githooks/    everything the kit writes is GENERATED (locally ignored); the project's own files stay as they are
 ```
 
-### Neyin repoya girdiği
+### What gets committed
 
-| Dosya | Repoda | Neden |
+| File | Committed | Why |
 |---|---|---|
-| `AGENTS.md`, `CLAUDE.md` | evet | Her araç aynı haritayı ve kuralı görür; kurulumu olmayan biri bile `.sdkit/`'e yönlenir |
-| `.sdkit/project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `roles.d/`, `memory/` | evet | Ekip için ortak; zamanla güncellenir, değişiklik PR'da görünür |
-| `.sdkit/sdkit.local.env`, `work/` | hayır | Kişiye özel |
-| `.sdkit/sdkit.env` | evet | Ekibin makine-okunur politikası |
-| `.sdkit/scripts/ hooks/ roles/ tiers.env`, `.frozen`, `.verify-cache/`, `.sdd/` | hayır | Üretilmiş ya da çalışma zamanı |
-| host dizinlerinde kitin ürettiği ayar, hook, rol, kural kopyası | hayır | `init` herkeste aynısını üretir |
-| host dizinlerinde projenin kendi skill, command, agent dosyaları | kit karışmaz | Projeye aittir |
+| `AGENTS.md`, `CLAUDE.md` | yes | Every tool sees the same map and rules; even someone without an install is pointed to `.sdkit/` |
+| `.sdkit/project.md`, `rules/`, `known-pitfalls.md`, `adr/`, `verify.d/`, `roles.d/`, `memory/` | yes | Shared by the team; updated over time, changes show up in the PR |
+| `.sdkit/sdkit.local.env`, `work/` | no | Personal |
+| `.sdkit/sdkit.env` | yes | The team's machine-readable policy |
+| `.sdkit/scripts/ hooks/ roles/ tiers.env`, `.frozen`, `.verify-cache/`, `.sdd/` | no | Generated or runtime |
+| settings, hooks, roles, rules copy the kit generates in host directories | no | `init` generates the same for everyone |
+| the project's own skill, command, agent files in host directories | the kit stays out | They belong to the project |
 
-Host tarafındaki ignore `.git/info/exclude` ile yapılır (yerel, `init` yazar); projenin `.gitignore`'una dokunulmaz.
+The host-side ignore is done with `.git/info/exclude` (local, written by `init`); the project's `.gitignore` is not touched.
 
-## 4. Bellek ve güncellemeler
+## 4. Memory and updates
 
-Güncellenebilir her şey `.sdkit/` altında tek yerde yaşar; ajanın yazacağı hedef hep orası:
+Everything updatable lives in one place under `.sdkit/`; that is always where the agent writes:
 
-| İçerik | Dosya | Yazan |
+| Content | File | Written by |
 |---|---|---|
-| Kalıcı proje belleği | `.sdkit/memory/` | `memory.sh add/promote` (kapanışta kullanıcı onayıyla) |
-| Geçici (görev) bellek | `.sdkit/work/<slug>/notes.md` | ajan görev sırasında; kişisel, kapanışta aday çıkarılır |
-| Hata sınıfları | `.sdkit/known-pitfalls.md` | `incident-to-rule` |
-| Kararlar | `.sdkit/adr/` | engineer / kullanıcı |
-| Doğrulama politikaları | `.sdkit/verify.d/` | kullanıcı |
+| Durable project memory | `.sdkit/memory/` | `memory.sh add/promote` (at closeout, with user approval) |
+| Temporary (task) memory | `.sdkit/work/<slug>/notes.md` | the agent during the task; personal, candidates are extracted at closeout |
+| Bug classes | `.sdkit/known-pitfalls.md` | `incident-to-rule` |
+| Decisions | `.sdkit/adr/` | engineer / user |
+| Verification policies | `.sdkit/verify.d/` | user |
 
-### Host yönlendirmesi
-Ajan belleğe iki yoldan gider; ikisi de git'te olan ya da ajanın kendi oturumunda çalışan şeylerdir:
+### Host routing
+The agent reaches memory in two ways; both are things that are in git or run in the agent's own session:
 
-- **Giriş dosyaları (repoda):** `AGENTS.md` ve `.claude/CLAUDE.md` içindeki kit bloğu "önce `.sdkit/memory/INDEX.md`'yi oku, kuralları `.sdkit/rules/`'ten oku, yazarken `memory.sh` / `incident-to-rule` / `adr/` ile `.sdkit/`'e yaz" der.
-- **Oturum hook'u (Claude):** `session-context.sh` `INDEX.md`'yi bağlama koyar.
-- Claude Code `.claude/memory.md` gibi bir yolu okumaz (belgelerle doğrulandı, §9), bu yüzden o yönde yönlendirme dosyası üretilmez.
-- Aracın kendi kişisel belleği (Claude'un kullanıcı düzeyi otomatik belleği) kitin kapsamı dışındadır; blok kalıcı proje bilgisinin `.sdkit/`'e yazılmasını ister.
+- **Entry files (committed):** the kit block in `AGENTS.md` and `.claude/CLAUDE.md` says "read `.sdkit/memory/INDEX.md` first, read rules from `.sdkit/rules/`, and when writing, write to `.sdkit/` with `memory.sh` / `incident-to-rule` / `adr/`".
+- **Session hook (Claude):** `session-context.sh` puts `INDEX.md` into the context.
+- Claude Code does not read a path like `.claude/memory.md` (confirmed against the docs, §9), so no routing file is generated for that.
+- The tool's own personal memory (Claude's user-level auto memory) is outside the kit's scope; the block asks for durable project knowledge to be written to `.sdkit/`.
 
-## 5. `sdkit.env` ve eksik anahtarlar
+## 5. `sdkit.env` and missing keys
 
-- `project.env` yerine `.sdkit/sdkit.env` (ekip, commit'li) ve `.sdkit/sdkit.local.env` (kişisel, ignore, sonra okunur).
-- `init` ve `upgrade`, şablonda olup dosyada olmayan anahtarları mevcut değerlere dokunmadan sona ekler (yorumlu blok). `doctor` eksik anahtarı bildirir.
-- Proje gerçekleri (risk ölçeği, release akışı, `PROTECTED_PATHS`, `SECRET_GLOBS`) hem `.sdkit/project.md`'de (insan okur, repoda) durur; `sdkit.env` bunları algılamadan ve `project.md`'den doldurur, çelişirse `doctor` uyarır.
+- Instead of `project.env`: `.sdkit/sdkit.env` (team, committed) and `.sdkit/sdkit.local.env` (personal, ignored, read after it).
+- `init` and `upgrade` append keys that are in the template but missing from the file to the end (as a commented block) without touching existing values. `doctor` reports missing keys.
+- Project facts (risk scale, release flow, `PROTECTED_PATHS`, `SECRET_GLOBS`) also live in `.sdkit/project.md` (read by humans, committed); `sdkit.env` fills them from detection and from `project.md`, and `doctor` warns if they conflict.
 
-## 6. Çözücü ve geriye uyum
+## 6. Resolver and backward compatibility
 
-Tek yardımcı (`bin/lib.sh`, `hooks/lib.sh`); 12 script'teki döngü ona iner. Sıra: `.sdkit/`, sonra eski `.agentkit`, `.claude`, `.codex` içindeki `project.env`.
-Eski düzen çalışmaya devam eder; `doctor` uyarı verir. `sdkit upgrade --migrate` (varsayılan `--dry-run`, önce arşiv yedeği): kit dosyalarını `.sdkit/`'e `git mv` ile taşır, `project.env`'i `sdkit.env` yapar,
-host bağlantılarını yeniden yazar, eski kit kopyalarını host dizinlerinden kaldırır. Projenin kendi skill, command ve agent dosyalarına dokunmaz.
+A single helper (`bin/lib.sh`, `hooks/lib.sh`); the loop in 12 scripts collapses into it. Order: `.sdkit/`, then `project.env` in the legacy `.agentkit`, `.claude`, `.codex`.
+The old layout keeps working; `doctor` warns. `sdkit upgrade --migrate` (default `--dry-run`, archive backup first): moves the kit files into `.sdkit/` with `git mv`, turns `project.env` into `sdkit.env`,
+rewrites the host links, removes old kit copies from the host directories. It does not touch the project's own skill, command and agent files.
 
-## 7. CI kapısı
+## 7. CI gate
 
-Önceki konuşmada "tamamen kaldır" kararı verilmişti, ama o karar `.sdkit/`'in repoya girmeyeceği varsayımına dayanıyordu. `.sdkit/` repoya girdiğine göre `attestations/` orada durabilir ve sunucu tarafı kapı çalışabilir.
-**Karar gerekiyor** (§9, soru 1). Varsayılan öneri: kapı **kalsın, isteğe bağlı** (`init --ci`), `attestations/` `.sdkit/` altında repoda.
+An earlier conversation had decided to "remove it entirely", but that decision rested on the assumption that `.sdkit/` would not be committed. Since `.sdkit/` is committed, `attestations/` can live there and the server-side gate can work.
+**Decision needed** (§9, question 1). Default proposal: the gate **stays, optional** (`init --ci`), with `attestations/` committed under `.sdkit/`.
 
-## 8. Etki
+## 8. Impact
 
-| Alan | İş |
+| Area | Work |
 |---|---|
-| Çözücü | `bin/lib.sh`, `hooks/lib.sh` ve 10 script'teki döngü tek yardımcı olur |
-| Şablonlar | `templates/sdkit.env`, `templates/sdkit.gitignore`, giriş dosyası blokları (`AGENTS.kit.md`, `CLAUDE.kit.md`); `claude.gitignore` kalkar |
-| `init` / `upgrade` / `doctor` / `sync` | yeni düzen, yerel ignore, eksik anahtar ekleme, `--migrate`, host yönlendirmeleri |
-| Hook ve skill'ler | `<project-dir>` yerine `.sdkit`; `project.env` → `sdkit.env` (105 dosyada geçiyor, `project.md` 69'unda) |
-| Yazan script'ler | `memory.sh`, `incident-to-rule` ve ADR şablonu hedefi `.sdkit/`'e sabitler |
-| Test | `run.sh`, `shared.test.sh`, `memory.test.sh`, `budget.test.sh` yeni ve eski düzende; `migrate` ve karma host için yeni testler |
-| Doküman | README, `docs/guide.md` (§3, §10, §15, §19), cheatsheet, `upgrading.md`; sayılar tek değişiklikte eşitlenir |
+| Resolver | the loop in `bin/lib.sh`, `hooks/lib.sh` and 10 scripts becomes a single helper |
+| Templates | `templates/sdkit.env`, `templates/sdkit.gitignore`, entry file blocks (`AGENTS.kit.md`, `CLAUDE.kit.md`); `claude.gitignore` goes away |
+| `init` / `upgrade` / `doctor` / `sync` | new layout, local ignore, appending missing keys, `--migrate`, host routing |
+| Hooks and skills | `.sdkit` instead of `<project-dir>`; `project.env` → `sdkit.env` (appears in 105 files, `project.md` in 69 of them) |
+| Writing scripts | `memory.sh`, `incident-to-rule` and the ADR template pin their target to `.sdkit/` |
+| Tests | `run.sh`, `shared.test.sh`, `memory.test.sh`, `budget.test.sh` on the new and the old layout; new tests for `migrate` and mixed hosts |
+| Docs | README, `docs/guide.md` (§3, §10, §15, §19), cheatsheet, `upgrading.md`; the numbers are aligned in a single change |
 
-## 9. Kararlar ve uygulamadaki sapmalar
+## 9. Decisions and deviations in the implementation
 
-Kararlar (kullanıcı onayıyla):
-- **CI kapısı ve attestation kalır**, isteğe bağlı (`init --ci`); `attestations/` ve CI için gereken iki script (`sdd.sh`, `resolve-base.sh`) `.sdkit/` içinde git'tedir. CI `sdkit.env`'i görmediği için varsayılanlarla çalışır.
-- **Bellek:** `.sdkit/memory/INDEX.md` ve girdiler (tek dosya değil). Yeni kurulumlarda **varsayılan açık**; `USAGE_LOG` da açık. Limitler (`TOKEN_BUDGET_TASK`, `MAX_SPAWNS`, `SUBAGENT_RESULT_MAX_LINES`) boş; kit sayı dayatmaz.
-- **Kitin varsayılan kuralları** (`core/rules`, stack kuralları) projede eksikse `.sdkit/rules/`'e kopyalanır (var olan dosyalar korunur); bunlar git'tedir ve proje düzenler.
-- **Eski düzen** 1.x boyunca okunur (`.claude`/`.codex`/`.agentkit` + `project.env`); sonraki majör sürümde kalkması planlı.
-- **Sürüm:** bu iş 1.0.0 olarak çıkar.
+Decisions (with user approval):
+- **The CI gate and attestations stay**, optional (`init --ci`); `attestations/` and the two scripts CI needs (`sdd.sh`, `resolve-base.sh`) are in git inside `.sdkit/`. CI does not see `sdkit.env`, so it runs with the defaults.
+- **Memory:** `.sdkit/memory/INDEX.md` plus entries (not a single file). **On by default** for new installs; `USAGE_LOG` is on as well. The limits (`TOKEN_BUDGET_TASK`, `MAX_SPAWNS`, `SUBAGENT_RESULT_MAX_LINES`) are empty; the kit imposes no numbers.
+- **The kit's default rules** (`core/rules`, stack rules) are copied into `.sdkit/rules/` if the project is missing them (existing files are kept); these are in git and the project edits them.
+- **The old layout** is read throughout 1.x (`.claude`/`.codex`/`.agentkit` + `project.env`); it is planned to go in the next major release.
+- **Version:** this work ships as 1.0.0.
 
-Doğrulama sonuçları (Claude Code belgelerine göre) ve sapmalar:
-- `CLAUDE.md` içinden `@yol` içe aktarma çalışır, `settings.local.json` plugin, marketplace, izin ve hook'ları okur, `.claude/rules/*.md` otomatik yüklenir ve bağlar izlenir; **ama `.claude/memory.md` türü bir yol Claude Code tarafından okunmaz.**
-- Bu yüzden **`.claude/memory.md` yönlendirme dosyası üretilmedi.** Belleğe giden gerçek yollar: oturum hook'u `INDEX.md`'yi bağlama koyar, kit bloğu (`CLAUDE.md` / `AGENTS.md`) "önce `.sdkit/memory/INDEX.md`'yi oku, yazarken `memory.sh` ile `.sdkit/`'e yaz" der.
-- **`@AGENTS.md` içe aktarması kullanılmadı;** `CLAUDE.md` ve `AGENTS.md` aynı kit bloğunu taşır (yinelenen kısa metin, tek şablon kaynağından `__KIT_DIR__` ile üretilir).
-- **Kurallar `.claude/rules/`'e bağlanmadı:** `.sdkit/rules/` Claude'da otomatik yüklenmez, blokta yol olarak listelenir ve ihtiyaç olunca okunur. Bu, her oturumda tüm kuralları bağlama yüklemeyen token ekonomisiyle uyumludur.
-- Claude'un kit girdileri `settings.local.json`'a gider; **kullanıcının kendi `settings.json`'ına dokunulmaz.** Eski düzende (ve `--migrate`'ten önce) `settings.json` kullanılır.
-- Host'un paylaşılan, proje dosyasına birleştirilen ayarları (`.codex/config.toml`, `.cursor/hooks.json`, `.gemini/settings.json`) diğer araçlarda yerel değişken olmadığı için yerinde birleştirilir; dosya zaten izleniyorsa kit değişikliği `git status`'ta görünür ve commit'lemek geliştiricinin kararıdır.
+Verification results (against the Claude Code docs) and deviations:
+- `@path` imports from inside `CLAUDE.md` work, `settings.local.json` reads plugins, marketplaces, permissions and hooks, `.claude/rules/*.md` is loaded automatically and symlinks are followed; **but a path like `.claude/memory.md` is not read by Claude Code.**
+- So **no `.claude/memory.md` routing file was generated.** The real paths to memory: the session hook puts `INDEX.md` into the context, and the kit block (`CLAUDE.md` / `AGENTS.md`) says "read `.sdkit/memory/INDEX.md` first, and when writing, write to `.sdkit/` with `memory.sh`".
+- **The `@AGENTS.md` import was not used;** `CLAUDE.md` and `AGENTS.md` carry the same kit block (short duplicated text, generated from a single template source with `__KIT_DIR__`).
+- **Rules were not linked into `.claude/rules/`:** `.sdkit/rules/` is not auto-loaded in Claude; it is listed by path in the block and read when needed. This fits the token economy of not loading every rule into the context in every session.
+- Claude's kit entries go to `settings.local.json`; **the user's own `settings.json` is not touched.** In the old layout (and before `--migrate`) `settings.json` is used.
+- The host's shared settings that are merged into a project file (`.codex/config.toml`, `.cursor/hooks.json`, `.gemini/settings.json`) are merged in place, since the other tools have no local variant; if the file is already tracked, the kit's change shows up in `git status` and committing it is the developer's call.
 
-**1.1.0 değişikliği.** 1.0.0'da `sdkit.env` tamamen kişiseldi; gerçek bir repoda bunun ekibin politikasını (`BASE_BRANCH_MODE=release`, `PROTECTED_BRANCHES`, `PROD_KUBE_CLUSTERS`, `PROTECTED_PATHS`, `SECRET_GLOBS`, `SERVICES_DIR` ...) tek makinede bıraktığı görüldü; arkadaşları `sdkit init` çalıştırınca bu korumalar varsayılana düşerdi. Karar: `sdkit.env` ortak ve commit'li, kişisel anahtarlar (`templates/sdkit.local.env`) `sdkit.local.env`'de. `init`/`upgrade`/`migrate`, 1.0.0 tek dosyasını `split_personal_env` ile böler.
+**1.1.0 change.** In 1.0.0 `sdkit.env` was entirely personal; in a real repo this turned out to leave the team's policy (`BASE_BRANCH_MODE=release`, `PROTECTED_BRANCHES`, `PROD_KUBE_CLUSTERS`, `PROTECTED_PATHS`, `SECRET_GLOBS`, `SERVICES_DIR` ...) on a single machine; when teammates ran `sdkit init`, these protections would fall back to the defaults. Decision: `sdkit.env` is shared and committed, the personal keys (`templates/sdkit.local.env`) are in `sdkit.local.env`. `init`/`upgrade`/`migrate` split the single 1.0.0 file with `split_personal_env`.
 
-## 10. Riskler
+## 10. Risks
 
-- **Büyük yüzey** (çözücü 11 script + hook + git hook + OpenCode eklentisi; 105 dosyada ad değişikliği). Önlem: eski düzen testlerle korunur, yeni düzen için `tests/sdkit-dir.test.sh`.
-- **Eski sürüm.** 0.5.x kurulu bir makine yeni düzende `sdkit.env` bulamaz; `upgrading.md` yazar.
-- **`--migrate`** yanlış dosyayı taşımasın diye yalnızca kitin bilinen adlarını ve manifest'teki dosyaları taşır, önce arşiv yedeği alır, varsayılan kuru koşudur.
-- **Karma ekip:** bir geliştiricide kit yoksa yalnızca commit'li `AGENTS.md` / `CLAUDE.md` bloğunu ve `.sdkit/` belgelerini görür; hook ve roller yoktur, kural belgede durur.
+- **Large surface** (resolver in 11 scripts + hooks + git hooks + OpenCode plugin; renaming in 105 files). Mitigation: the old layout is protected by tests, `tests/sdkit-dir.test.sh` for the new layout.
+- **Old version.** A machine with 0.5.x installed does not find `sdkit.env` in the new layout; `upgrading.md` says so.
+- **`--migrate`**, so it does not move the wrong file, moves only the kit's known names and the files in the manifest, takes an archive backup first, and is a dry run by default.
+- **Mixed team:** a developer without the kit sees only the committed `AGENTS.md` / `CLAUDE.md` block and the `.sdkit/` docs; there are no hooks or roles, the rules live in the docs.

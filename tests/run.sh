@@ -179,7 +179,7 @@ expect "install.sh --status ok" 0 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.
 expect "install.sh --uninstall" 0 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.sh" --uninstall
 expect "install.sh --status fails when unregistered" 1 env XDG_CONFIG_HOME="$xdg" "$ROOT/bin/install.sh" --status
 ci="$tmp/ci-repo"; mkdir -p "$ci"; git -C "$ci" init -q -b main; printf 'module x' > "$ci/go.mod"
-expect "init --ci bitbucket" 0 bash -c "'$ROOT/bin/init.sh' --ci bitbucket '$ci' >/dev/null && grep -q 'sdd.sh ci-check' '$ci/bitbucket-pipelines.yml' && test -x '$ci/.sdkit/scripts/sdd.sh'"
+expect "init --ci bitbucket" 0 bash -c "'$ROOT/bin/init.sh' --ci bitbucket '$ci' >/dev/null && grep -qE 'sdd[.]sh.? ci-check' '$ci/bitbucket-pipelines.yml' && test -x '$ci/.sdkit/scripts/sdd.sh'"
 expect "init --ci rejects unknown hosts" 2 "$ROOT/bin/init.sh" --ci svn "$ci"
 expect "sync --check is clean after init" 0 "$ROOT/bin/sync.sh" --check "$ci"
 echo "# local edit" >> "$ci/.sdkit/scripts/sdd.sh"

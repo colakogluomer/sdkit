@@ -1,212 +1,212 @@
-# Akıllı orkestrasyon ve maliyet bilinçli yönlendirme (F06)
+# Smart orchestration and cost-aware routing (F06)
 
-Bu belge `scripts/route.sh` (karar motoru), `core/adapters.json` (yürütme sözleşmesi) ve `scripts/run-role.sh`'ın bu kararı nasıl tükettiğini anlatır.
-Kısa özet: **çekirdek politikayı sahiplenir, adaptörler yetenek bildirir, sağlayıcılar çalıştırır.** Hiçbir karar için model çağrılmaz.
+This document describes `scripts/route.sh` (the decision engine), `core/adapters.json` (the execution contract) and how `scripts/run-role.sh` consumes that decision.
+In short: **the core owns policy, adapters declare capabilities, providers execute.** No model is called for any decision.
 
-## 1. Neyi çözer, neyi çözmez
+## 1. What it solves and what it does not
 
-| Soru | Cevap veren | Model çağrısı |
+| Question | Answered by | Model call |
 |---|---|---|
-| Sıradaki rol zorunlu mu? | `workflow.sh policy` (risk + profil); `route.sh` yalnızca okur | yok |
-| Hangi adaptör ve model? | `route.sh` (kayıt defteri + risk + rol + tercih) | yok |
-| Çalıştırılsın mı, yeniden kullanılsın mı? | `route.sh` (`sdd.sh evidence` durumu) | yok |
-| Hata sonrası yeniden dene / yükselt / dur? | `route.sh` (hata sınıfı + sınırlar) | yok |
-| Bütçe izin veriyor mu? | `route.sh` (kullanım defteri + ayarlar) | yok |
+| Is the next role mandatory? | `workflow.sh policy` (risk + profile); `route.sh` only reads it | none |
+| Which adapter and model? | `route.sh` (registry + risk + role + preference) | none |
+| Run it, or reuse? | `route.sh` (`sdd.sh evidence` state) | none |
+| After a failure: retry / escalate / stop? | `route.sh` (failure class + limits) | none |
+| Does the budget allow it? | `route.sh` (usage ledger + settings) | none |
 
-Eklenen **zorunlu** model çağrısı: 0. Karar başına maliyet yalnızca yerel süreçlerdir (ölçüm: §10).
+**Mandatory** model calls added: 0. The cost per decision is local processes only (measurement: §10).
 
-Kapsam dışı (bilerek): LiteLLM, FusionCLI veya herhangi bir vekil/ağ geçidi; harici orkestrasyon servisi; eşzamanlı ajan zamanlayıcısı; F07/F08.
+Out of scope (deliberately): LiteLLM, FusionCLI or any proxy/gateway; an external orchestration service; a concurrent agent scheduler; F07/F08.
 
-## 2. Mimari
+## 2. Architecture
 
 ```
-                 sdkit.env (ROUTING, ROUTE_*)         core/tiers.env + <project-dir>/models.json  (kayıt defteri)
+                 sdkit.env (ROUTING, ROUTE_*)         core/tiers.env + <project-dir>/models.json  (registry)
                               │                                        │
- workflow.sh policy ──► ┌──────────────┐ ◄── sdd.sh evidence      core/adapters.json (yetenekler)
- (risk, profil,         │   route.sh   │ ◄── usage.jsonl (kullanım)
-  zorunlu roller)       │   decide     │ ◄── work/<görev>/routing.jsonl (önceki denemeler)
+ workflow.sh policy ──► ┌──────────────┐ ◄── sdd.sh evidence      core/adapters.json (capabilities)
+ (risk, profile,        │   route.sh   │ ◄── usage.jsonl (usage)
+  mandatory roles)      │   decide     │ ◄── work/<task>/routing.jsonl (previous attempts)
                         └──────┬───────┘
-                               │ karar (JSON): action, adapter, model, tier, budget, attempt, reason, policy_version
+                               │ decision (JSON): action, adapter, model, tier, budget, attempt, reason, policy_version
                                ▼
-                        run-role.sh ──► ana makine CLI'ı (claude | codex | opencode | cursor-agent | gemini) ──► sağlayıcı
-                               │ süreç bitince
+                        run-role.sh ──► host CLI (claude | codex | opencode | cursor-agent | gemini) ──► provider
+                               │ when the process ends
                                ▼
-                        route.sh outcome  (hata sınıfı, süre, token: yoksa null)  ──► sonraki karar bunu okur
+                        route.sh outcome  (failure class, duration, tokens: null if absent)  ──► the next decision reads this
 ```
 
-`ROUTING=on` iken `run-role.sh` kararı **tüketir**: ana makine, model, katman, zaman aşımı ve bekleme kararın içinden gelir; `execute|retry|escalate`
-dışındaki bir karar hiçbir şey başlatmaz. `route.sh` yoksa veya karar üretmezse `run-role.sh` **çalışmaz** (exit 2): politika sessizce atlanmaz.
+With `ROUTING=on`, `run-role.sh` **consumes** the decision: host, model, tier, timeout and wait all come from the decision; a decision other than `execute|retry|escalate`
+starts nothing. If `route.sh` is missing or produces no decision, `run-role.sh` **does not run** (exit 2): the policy is never silently skipped.
 
-## 3. Karar yaşam döngüsü
+## 3. Decision lifecycle
 
-`route.sh decide --role R` sırayla şunları değerlendirir; ilk kesin cevap kazanır:
+`route.sh decide --role R` evaluates the following in order; the first definite answer wins:
 
-1. Ayar ve kayıt defteri doğrulaması (`CONFIG_INVALID`), rol metni (`UNKNOWN_ROLE`).
-2. Görev gerçekleri: risk, profil, zorunluluk (`workflow.sh policy --json`). Açık görev yoksa risk **orta varsayılır** ve ucuzlatma yapılmaz.
-3. **Kanıt** (yalnızca verifier/reviewer/security-auditor):
-   bu diff için bir BLOCK duruyorsa → `stop` (`SECURITY_BLOCK` / `VERIFICATION_FAILED`); `--rerun` ve başka sağlayıcı bunu değiştirmez.
-   `sdd.sh evidence` durumu `valid` ise → `reuse` (`EVIDENCE_REUSED`). `stale|untrusted|conflict|missing` ise çalıştır.
-4. **Zincir** (aynı rol + aynı handoff + gerekirse aynı diff = aynı istek): uçuştaki çalıştırma varsa `DUPLICATE_IN_FLIGHT`; tamamlanmış aynı istek `DUPLICATE_COMPLETED`
-   (`--rerun <neden>` ile aşılır); önceki başarısızlık sınıfına göre `retry` / `escalate` / `stop` (§6).
-5. **Katman**: rolün kendi katmanı → `--tier` (bağımsız roller kendi katmanının altına inmez) → risk tabanları (`ROUTE_FLOOR_*`; yüksek riskte verifier derin katman).
-6. **Adaptör ve model**: aday adaptörler (`--host` > tercih > sabit politika > `VERIFIER_HOST`/`RUN_ROLE_HOST` + `ROUTE_FALLBACK_HOSTS`); gerekli yetenekler; kayıt defterinden
-   rolü destekleyen, **gereken katmana eşit veya üstü** en düşük katmanlı kayıt. Daha alt katman asla ikame edilmez.
-7. **Bütçe** (§8). Zorunlu rol bütçe nedeniyle çalışamıyorsa `BUDGET_EXHAUSTED` (exit 3): görev durumu değişmez, sahte PASS yazılmaz.
-8. `--reserve` ile karar defterine yazılır, çağrı sayısı artar (kilit altında: iki eşzamanlı istek aynı çalıştırmayı başlatamaz).
+1. Settings and registry validation (`CONFIG_INVALID`), role text (`UNKNOWN_ROLE`).
+2. Task facts: risk, profile, whether the role is mandatory (`workflow.sh policy --json`). With no open task, the risk is **assumed to be medium** and no downgrade is applied.
+3. **Evidence** (verifier/reviewer/security-auditor only):
+   if a BLOCK stands for this diff → `stop` (`SECURITY_BLOCK` / `VERIFICATION_FAILED`); neither `--rerun` nor another provider changes this.
+   If the `sdd.sh evidence` state is `valid` → `reuse` (`EVIDENCE_REUSED`). If it is `stale|untrusted|conflict|missing`, run.
+4. **Chain** (same role + same handoff + same diff where relevant = same request): if a run is in flight, `DUPLICATE_IN_FLIGHT`; an identical completed request gives `DUPLICATE_COMPLETED`
+   (overridden with `--rerun <reason>`); depending on the previous failure class, `retry` / `escalate` / `stop` (§6).
+5. **Tier**: the role's own tier → `--tier` (independent roles never go below their own tier) → risk floors (`ROUTE_FLOOR_*`; at high risk the verifier gets the deep tier).
+6. **Adapter and model**: candidate adapters (`--host` > preference > fixed policy > `VERIFIER_HOST`/`RUN_ROLE_HOST` + `ROUTE_FALLBACK_HOSTS`); required capabilities; from the registry,
+   the lowest-tier entry that supports the role and is **at or above the required tier**. A lower tier is never substituted.
+7. **Budget** (§8). If a mandatory role cannot run because of the budget, `BUDGET_EXHAUSTED` (exit 3): the task state does not change, and no fake PASS is written.
+8. With `--reserve`, the decision is written to the decision ledger and the call count goes up (under a lock: two concurrent requests cannot start the same run).
 
-Çıktı (kısaltılmış): `decision_id, task, role, role_class, mandatory, risk, profile, action, adapter, model, effort, tier, tier_enforced, timeout_s, budget, attempt, wait_s, reason, policy_version`
-(+ `previous`, `notes`, `warnings` gerektiğinde). Her karar tek bir **neden kodu** taşır.
+Output (abbreviated): `decision_id, task, role, role_class, mandatory, risk, profile, action, adapter, model, effort, tier, tier_enforced, timeout_s, budget, attempt, wait_s, reason, policy_version`
+(+ `previous`, `notes`, `warnings` when needed). Every decision carries a single **reason code**.
 
-### Neden kodları
+### Reason codes
 
-| Eylem | Kodlar |
+| Action | Codes |
 |---|---|
 | execute | `ROLE_CAPABILITY_MATCH`, `RISK_FLOOR_APPLIED`, `DOWNGRADE_LOW_RISK`, `PREFERENCE_APPLIED`, `OVERRIDE_APPLIED`, `FIXED_POLICY`, `ADAPTER_FALLBACK`, `RERUN_REQUESTED` |
 | retry | `RETRY_TRANSIENT`, `RETRY_RATE_LIMIT`, `RETRY_TIMEOUT`, `RETRY_INTERRUPTED`, `RETRY_INVALID_OUTPUT`, `RETRY_CONTRACT_FAILURE`, `ADAPTER_FALLBACK` |
 | escalate | `ESCALATE_INVALID_OUTPUT`, `ESCALATE_CONTRACT_FAILURE` |
 | stop (exit 3) | `BUDGET_EXHAUSTED` |
-| stop (exit 2, politika/yapılandırma reddi) | `CONFIG_INVALID`, `UNKNOWN_ROLE`, `NO_ADAPTER`, `ADAPTER_UNSUPPORTED`, `NO_COMPATIBLE_MODEL`, `OVERRIDE_INVALID`, `OVERRIDE_BELOW_FLOOR`, `PREFERENCE_INVALID`, `PREFERENCE_BELOW_FLOOR`, `FIXED_INVALID`, `FIXED_BELOW_FLOOR`, `NO_ESCALATION_TARGET` |
-| reuse (exit 7) | `EVIDENCE_REUSED` (yukarıda) |
-| stop (exit 8, çalıştırılmadı, geçerli sonuç yok) | `SECURITY_BLOCK`, `VERIFICATION_FAILED`, `DUPLICATE_IN_FLIGHT`, `DUPLICATE_COMPLETED`, `RETRIES_EXHAUSTED`, `ESCALATION_LIMIT`, `REPORTED_FAILURE`, `UNCLASSIFIED_FAILURE`, `OPTIONAL_SKIPPED` |
+| stop (exit 2, policy/configuration refusal) | `CONFIG_INVALID`, `UNKNOWN_ROLE`, `NO_ADAPTER`, `ADAPTER_UNSUPPORTED`, `NO_COMPATIBLE_MODEL`, `OVERRIDE_INVALID`, `OVERRIDE_BELOW_FLOOR`, `PREFERENCE_INVALID`, `PREFERENCE_BELOW_FLOOR`, `FIXED_INVALID`, `FIXED_BELOW_FLOOR`, `NO_ESCALATION_TARGET` |
+| reuse (exit 7) | `EVIDENCE_REUSED` (above) |
+| stop (exit 8, not run, no valid result) | `SECURITY_BLOCK`, `VERIFICATION_FAILED`, `DUPLICATE_IN_FLIGHT`, `DUPLICATE_COMPLETED`, `RETRIES_EXHAUSTED`, `ESCALATION_LIMIT`, `REPORTED_FAILURE`, `UNCLASSIFIED_FAILURE`, `OPTIONAL_SKIPPED` |
 
-`run-role.sh` / `route.sh decide` çıkış kodları: ana makinenin kodu | 3 bütçe | 2 politika/yapılandırma reddi | **7 geçerli kanıt yeniden kullanıldı** (başarı benzeri: çalıştırılacak/yeniden denenecek bir şey yok; `state.sh retry` çağrılmaz) |
-**8 yönlendirme çalıştırmamaya karar verdi ve geçerli sonuç yok** (kopya, duran BLOCK, deneme/yükseltme bitti, isteğe bağlı rol atlandı): asla başarı sayılmaz. Hiçbiri tek başına "doğrulandı" demek değildir; kapıyı `sdd.sh evidence` / faz kapısı belirler.
-(F06'da 7 her iki durumu da kapsıyordu; F06.1'de ayrıldı. Çağıran olarak yalnızca `bench/run.sh` var ve yönlendirmeyi hiç açmaz; diğer çağıranlar orkestratör talimatlarıdır: `hosts.md`, `model-routing.md`.)
+`run-role.sh` / `route.sh decide` exit codes: the host's code | 3 budget | 2 policy/configuration refusal | **7 valid evidence was reused** (success-like: nothing to run or retry; `state.sh retry` is not called) |
+**8 routing decided not to run and there is no valid result** (duplicate, standing BLOCK, attempts/escalations exhausted, optional role skipped): never counted as success. Neither code alone means "verified"; the gate is decided by `sdd.sh evidence` / the phase gate.
+(In F06, 7 covered both cases; F06.1 split them. The only caller is `bench/run.sh`, which never turns routing on; other callers are orchestrator instructions: `hosts.md`, `model-routing.md`.)
 
-## 4. Kayıt defteri (model)
+## 4. Registry (models)
 
-Varsayılan kayıtlar `core/tiers.env`'den **türetilir**; kit model adı, fiyat veya bağlam sınırı uydurmaz.
+The default entries are **derived** from `core/tiers.env`; the kit does not invent model names, prices or context limits.
 
-| Alan | Anlam |
+| Field | Meaning |
 |---|---|
-| `id` | tekil kimlik (`claude:standard`) |
-| `adapter` / `provider` | yürütme adaptörü / bilinen sağlayıcı ipucu (`core/adapters.json`) |
-| `model` | `--model` değeri; `null` = ana makinenin varsayılan modeli |
-| `effort` | yalnızca codex: akıl yürütme eforu (katman bununla ayrılır) |
-| `tier` | `light|standard|strong`; `*` = "ana makine varsayılanı", katman **doğrulanamaz** (`tier_enforced:false`, karar `MODEL_INHERITED` uyarısı taşır) |
-| `roles` | `"*"` veya rol listesi |
+| `id` | unique ID (`claude:standard`) |
+| `adapter` / `provider` | execution adapter / known provider hint (`core/adapters.json`) |
+| `model` | the `--model` value; `null` = the host's default model |
+| `effort` | codex only: reasoning effort (tiers are told apart by it) |
+| `tier` | `light|standard|strong`; `*` = "host default", the tier **cannot be verified** (`tier_enforced:false`, the decision carries a `MODEL_INHERITED` warning) |
+| `roles` | `"*"` or a list of roles |
 | `status` | `available|disabled` |
-| `cost` | yalnızca kullanıcının `pricing.json` tablosunda varsa; yoksa `null` |
-| `usage_accounting` | adaptörün token raporlama yeteneği |
-| `context`, `tools` | bilinmiyorsa `null` / `true` |
+| `cost` | only if present in the user's `pricing.json` table; otherwise `null` |
+| `usage_accounting` | the adapter's token-reporting capability |
+| `context`, `tools` | `null` / `true` if unknown |
 
-Projeye özel girdiler `<project-dir>/models.json` (JSON dizisi) içine yazılır; aynı `id` türetilmişi **ezer**, yeni `id` eklenir. Örnek:
+Project-specific entries go into `<project-dir>/models.json` (a JSON array); the same `id` **overrides** the derived entry, and a new `id` is added. Example:
 
 ```json
 [
-  {"id": "gem:fast", "adapter": "gemini", "model": "<sizin-model-kimliğiniz>", "tier": "light", "roles": ["scout", "analyst"]},
+  {"id": "gem:fast", "adapter": "gemini", "model": "<your-model-id>", "tier": "light", "roles": ["scout", "analyst"]},
   {"id": "claude:strong", "adapter": "claude", "model": "opus", "tier": "strong", "status": "disabled"}
 ]
 ```
 
-`route.sh registry` kaydı, `route.sh validate` ayarları ve `models.json`'ı denetler.
+`route.sh registry` shows the registry; `route.sh validate` checks the settings and `models.json`.
 
-## 5. Yürütme sözleşmesi (adaptörler)
+## 5. Execution contract (adapters)
 
-`ExecutionAdapter` kavramsaldır; yeni bir çerçeve yoktur. Karşılıkları: `capabilities()` = `core/adapters.json`, `execute()` = `run-role.sh`'ın ana makine kolu,
-`usage()` = o koldaki token ayrıştırması, `cancel()` = **yok** (hiçbir adaptör iddia etmez).
+`ExecutionAdapter` is a concept; there is no new framework. Its counterparts: `capabilities()` = `core/adapters.json`, `execute()` = the host branch of `run-role.sh`,
+`usage()` = the token parsing in that branch, `cancel()` = **none** (no adapter claims it).
 
-Değerler (F06.1): `help-verified` = yeteneğin ihtiyaç duyduğu **her bayrak** o makinede kurulu CLI'ın `--help` çıktısında bulundu (sürüm `core/adapters.json` `_checked` içinde); davranış **çalıştırılmadı**;
-`declared` = kit bayrağı/çıktıyı ana makinenin belgelenmiş başsız moduna göre kullanır, bu makinede **hiç denetlenmedi** (CLI kurulu değil); `estimated` = rapor edilir ama yalnızca ana makinenin kendi istemci tarafı tahmini, fatura değil;
-`kit` = kit sağlar; `none` = desteklenmez. Hiçbir değer "canlı modelle uçtan uca çalışıyor" demek değildir. `route.sh capabilities --probe` kurulu CLI'ların `--help`'ini okuyarak bayrakları yeniden denetler (model çağrısı yok);
-eksik bayrak adıyla raporlanır, kurulu olmayan CLI "doğrulanmadı" kalır. `tests/route.test.sh` iddiaları `run-role.sh`'ın komut satırına ve probe'a karşı sınar.
+Values (F06.1): `help-verified` = **every flag** the capability needs was found in the `--help` output of the CLI installed on that machine (the version is in `core/adapters.json` `_checked`); the behaviour was **not run**;
+`declared` = the kit uses the flag/output according to the host's documented headless mode, **never checked on this machine** (CLI not installed); `estimated` = reported, but only as the host's own client-side estimate, not a bill;
+`kit` = the kit provides it; `none` = not supported. No value means "works end to end with a live model". `route.sh capabilities --probe` re-checks the flags by reading the installed CLIs' `--help` (no model call);
+a missing flag is reported by name, and a CLI that is not installed stays "not verified". `tests/route.test.sh` checks the claims against `run-role.sh`'s command line and the probe.
 
-| Yetenek | claude | codex | opencode | cursor | gemini |
+| Capability | claude | codex | opencode | cursor | gemini |
 |---|---|---|---|---|---|
 | noninteractive (`-p` / `--sandbox` / `--dir`) | **help-verified** (2.1.316) | declared | declared | declared | declared |
-| tool_use (salt okunur/yazma bayrakları) | **help-verified** | declared | declared | declared | declared |
-| model_selection | **help-verified** | declared (`-m`; kademe için eforu da) | declared | declared | declared |
-| structured_output (`--output-format json`) | **help-verified** (`json` seçeneği `--help`'te) | none | none | declared | declared |
-| usage_reporting (token) | declared (JSON biçimi `--help`'te yok, çalıştırılmadı) | none | none | none | declared |
-| cache kullanımı | declared | none | none | none | none |
+| tool_use (read-only/write flags) | **help-verified** | declared | declared | declared | declared |
+| model_selection | **help-verified** | declared (`-m`; also effort for the tier) | declared | declared | declared |
+| structured_output (`--output-format json`) | **help-verified** (the `json` option is in `--help`) | none | none | declared | declared |
+| usage_reporting (tokens) | declared (JSON shape not in `--help`, not run) | none | none | none | declared |
+| cache usage | declared | none | none | none | none |
 | cancellation | none | none | none | none | none |
 | timeout | kit | kit | kit | kit | kit |
-| cost_reporting | **estimated** (`total_cost_usd`, aşağıda) | none | none | none | none |
+| cost_reporting | **estimated** (`total_cost_usd`, below) | none | none | none | none |
 
-Doğrulama durumu (2026-10-31): bu makinede yalnızca `claude` kurulu; codex, opencode, cursor-agent ve gemini **kurulu değil**, bu yüzden onların tüm yetenekleri `declared` (doğrulanmadı) kalır.
+Verification status (2026-10-31): only `claude` is installed on this machine; codex, opencode, cursor-agent and gemini are **not installed**, so all of their capabilities stay `declared` (not verified).
 
-`timeout` yalnızca makinede `timeout` veya `gtimeout` varsa **sert**; yoksa karar bunu `advisory` olarak işaretler.
-Gelecekteki adaptörler (OpenAI uyumlu ağ geçidi, LiteLLM, yerel model, kurumsal sağlayıcı) `adapters.json`'a bir kayıt ve `run-role.sh`'a bir kol eklenerek bağlanır; şimdi eklenmedi.
+`timeout` is **hard** only if the machine has `timeout` or `gtimeout`; otherwise the decision marks it `advisory`.
+Future adapters (an OpenAI-compatible gateway, LiteLLM, a local model, an enterprise provider) are connected by adding an entry to `adapters.json` and a branch to `run-role.sh`; none was added now.
 
-### 5.1 Maliyet telemetrisi (F06.1)
+### 5.1 Cost telemetry (F06.1)
 
-Claude Code'un `--output-format json` çıktısındaki `total_cost_usd`, belgelere göre ([cost-tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking.md)) **istemci tarafı tahmindir, fatura değildir**
-(abonelik/Max kuralları, fiyat değişimi, bilinmeyen model, üçüncü taraf sağlayıcı farklılıkları yüzünden gerçek faturadan sapabilir) ve `--resume`/`--continue` ile **kümülatiftir**.
-`run-role.sh` oturum sürdürmez (her çalıştırma yeni oturum), bu yüzden değer çalıştırma başınadır. **Bu alan bu makinede canlı bir model çağrısıyla doğrulanmadı** (ücretli çağrı yasak); anlamı belgeden, ayrıştırma sahte CLI ile sınanmıştır.
+Claude Code's `total_cost_usd` in the `--output-format json` output is, per the docs ([cost-tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking.md)), a **client-side estimate, not a bill**
+(it can deviate from the real bill because of subscription/Max rules, price changes, unknown models, third-party provider differences) and is **cumulative** with `--resume`/`--continue`.
+`run-role.sh` does not resume sessions (every run is a new session), so the value is per run. **This field was not verified with a live model call on this machine** (paid calls are forbidden); its meaning comes from the docs, and the parsing is tested with a fake CLI.
 
-Üç şey **ayrı** tutulur: (1) kit'in `pricing.json` fiyat tablosundan token'larla hesapladığı `estimated_usd`; (2) ana makinenin kendi tahmini `host_reported_estimate_usd` (`usage.jsonl`'da `cost_est_usd` + `cost_src:"host-estimate"`,
-`routing.jsonl`'da `host_cost_estimate_usd` + `cost_provenance`); (3) gerçekte faturalanan `actual_usd`, daima `null` (hiçbir kaynak bunu bildirmez). Sayısal olmayan/negatif/eksik değer **yazılmaz** (sıfır yazılmaz).
-`ROUTE_BUDGET_COST` aşımında uyarı kaynağı belirtilir (`COST_HOST_ESTIMATE_OVER_BUDGET`: "kendi istemci tarafı tahmini, fatura değil") ve hiçbir zaman durdurmaz.
-Not: `claude --max-budget-usd` (yalnızca print kipi, istemci tarafı tahmine göre, geçilebilir) kullanılmadı; kit'in sert bütçe sınırı yerine geçmez.
+Three things are kept **separate**: (1) `estimated_usd`, which the kit computes from tokens using the `pricing.json` price table; (2) the host's own estimate `host_reported_estimate_usd` (`cost_est_usd` + `cost_src:"host-estimate"` in `usage.jsonl`,
+`host_cost_estimate_usd` + `cost_provenance` in `routing.jsonl`); (3) the actually billed `actual_usd`, always `null` (no source reports it). A non-numeric/negative/missing value is **not written** (zero is not written).
+When `ROUTE_BUDGET_COST` is exceeded, the warning names its source (`COST_HOST_ESTIMATE_OVER_BUDGET`: "its own client-side estimate, not a bill") and never stops the run.
+Note: `claude --max-budget-usd` (print mode only, based on the client-side estimate, can be overshot) is not used; it does not replace the kit's hard budget limit.
 
-## 6. Yeniden deneme ve yükseltme
+## 6. Retry and escalation
 
-`run-role.sh` her çalıştırmanın sonunda `route.sh outcome` ile sonucu **sınıflandırarak** kaydeder; sonraki istek bu sınıfı okur.
+At the end of every run, `run-role.sh` records the outcome with `route.sh outcome`, **classifying** it; the next request reads this class.
 
-| Sınıf | Nasıl belirlenir | Sonraki karar |
+| Class | How it is determined | Next decision |
 |---|---|---|
-| `OK` | exit 0, BLOCK değil | aynı istek tekrar gelirse `DUPLICATE_COMPLETED` (kanıt rolleri için kanıt durumu belirler) |
-| `TRANSIENT` | stderr: 502/503/504, bağlantı sıfırlandı, ağ ... | aynı modelle `retry`, en çok `ROUTE_MAX_RETRIES` (2) |
-| `RATE_LIMIT` | stderr: 429, rate limit, quota, overloaded | `retry` + `wait_s` geri çekilme (`ROUTE_BACKOFF_S` × deneme) |
-| `TIMEOUT` | exit 124 veya stderr timeout/deadline | `retry` (aynı sınır) |
-| `INTERRUPTED` | karar var, süreç öldü, sonuç yok | `retry` |
-| `INVALID_OUTPUT` | exit 6 (geçerli verdict bloğu yok) | bir `retry`, sonra `escalate` (`ROUTE_MAX_ESCALATIONS`, 1) |
-| `CONTRACT_FAILURE` | exit 4 | aynı |
-| `HOST_MISSING` | exit 127 | `ROUTE_FALLBACK_HOSTS`'taki sonraki adaptör, yoksa `stop` |
-| `REPORTED_FAILURE` | exit 5 (geçerli ama partial/blocked/failed) | `stop`: bu bir **kod düzeltme** kararıdır (`state.sh retry`), altyapı yeniden denemesi değil |
+| `OK` | exit 0, not a BLOCK | if the same request comes again, `DUPLICATE_COMPLETED` (for evidence roles, the evidence state decides) |
+| `TRANSIENT` | stderr: 502/503/504, connection reset, network ... | `retry` with the same model, at most `ROUTE_MAX_RETRIES` (2) |
+| `RATE_LIMIT` | stderr: 429, rate limit, quota, overloaded | `retry` + `wait_s` backoff (`ROUTE_BACKOFF_S` × attempt) |
+| `TIMEOUT` | exit 124 or stderr timeout/deadline | `retry` (same limit) |
+| `INTERRUPTED` | a decision exists, the process died, no result | `retry` |
+| `INVALID_OUTPUT` | exit 6 (no valid verdict block) | one `retry`, then `escalate` (`ROUTE_MAX_ESCALATIONS`, 1) |
+| `CONTRACT_FAILURE` | exit 4 | same |
+| `HOST_MISSING` | exit 127 | the next adapter in `ROUTE_FALLBACK_HOSTS`, otherwise `stop` |
+| `REPORTED_FAILURE` | exit 5 (valid but partial/blocked/failed) | `stop`: this calls for a **code fix** (`state.sh retry`), not an infrastructure retry |
 | `VERIFICATION_FAILURE` | verifier/reviewer BLOCK | `stop` |
-| `SECURITY_BLOCK` | security-auditor BLOCK | `stop`; sağlayıcı/model değiştirmek BLOCK'u PASS yapmaz |
-| `BUDGET_EXHAUSTED` | exit 3 | bütçe yeniden değerlendirilir |
-| `UNKNOWN` | açıklanamayan hata | `stop` (`UNCLASSIFIED_FAILURE`): kör yeniden deneme yok |
+| `SECURITY_BLOCK` | security-auditor BLOCK | `stop`; changing the provider/model does not turn a BLOCK into a PASS |
+| `BUDGET_EXHAUSTED` | exit 3 | the budget is re-evaluated |
+| `UNKNOWN` | unexplained failure | `stop` (`UNCLASSIFIED_FAILURE`): no blind retry |
 
-- Altyapı yeniden denemeleri (`ROUTE_MAX_RETRIES`) kod düzeltme yeniden denemesinden (`state.sh retry`, tek hak) **ayrıdır** ve onu tüketmez.
-- Zincir toplamı `ROUTE_MAX_ATTEMPTS` (4) ile sınırlıdır. Aynı handoff'u kör tekrar etmek yoktur: her yeniden denemenin neden kodu ve `previous.failure_class` kaydı vardır.
-- Yükseltme bir üst katmana gider, `ROUTE_ESCALATE_TO` (strong) ile sınırlıdır; ana makine varsayılan modeliyle çalışmış bir deneme (katman doğrulanamaz) yükseltilemez (`NO_ESCALATION_TARGET`).
-- Yükseltme kanıt gerekliliğini gevşetmez: kanıt kapısı ve risk tabanları aynen geçerlidir. Tam bağlamı tekrarlamak gerekmez: kayıt yalnızca karar kimliği ve hata sınıfını taşır.
+- Infrastructure retries (`ROUTE_MAX_RETRIES`) are **separate** from the code-fix retry (`state.sh retry`, a single chance) and do not consume it.
+- The chain total is capped by `ROUTE_MAX_ATTEMPTS` (4). There is no blind repetition of the same handoff: every retry has a reason code and a `previous.failure_class` record.
+- Escalation goes one tier up, capped by `ROUTE_ESCALATE_TO` (strong); an attempt that ran with the host's default model (tier cannot be verified) cannot be escalated (`NO_ESCALATION_TARGET`).
+- Escalation does not loosen the evidence requirement: the evidence gate and the risk floors apply as is. The full context need not be repeated: the record carries only the decision ID and the failure class.
 
-## 7. Zamanlama ve bağımsızlık
+## 7. Scheduling and independence
 
-- **Zorunlu** (`mandatory:true`): yüksek riskte verifier, reviewer, security-auditor; orta/yüksek riskte veya `high-assurance` profilinde verifier. Bütçe yetmezse durur (`BUDGET_EXHAUSTED`), atlanmaz.
-- **İsteğe bağlı**: scout, analyst ve yüksek risk altında reviewer/security-auditor. Görev token bütçesi uyarı seviyesine (`TOKEN_BUDGET_WARN_PCT`) ulaşınca `OPTIONAL_SKIPPED` ile **gerekçeli** atlanır (`--rerun` ile zorlanır).
-- **Tamamlanmış**: geçerli güvenilir kanıt varsa `reuse`; bayat kanıt asla yeniden kullanılmaz.
-- Aynı modeli birden çok role yönlendirmek bağımsızlığı bozmaz: kimlik `run-role.sh`'ın süreç sahipli koşu kimliği ve rol başına kayıt ile (F04) korunur; rol ayrımı aynen zorlanır.
+- **Mandatory** (`mandatory:true`): verifier, reviewer and security-auditor at high risk; the verifier at medium/high risk or in the `high-assurance` profile. If the budget is not enough, it stops (`BUDGET_EXHAUSTED`); it is not skipped.
+- **Optional**: scout, analyst, and reviewer/security-auditor below high risk. When the task token budget reaches the warning level (`TOKEN_BUDGET_WARN_PCT`) they are skipped **with a reason** via `OPTIONAL_SKIPPED` (forced with `--rerun`).
+- **Completed**: `reuse` if valid trusted evidence exists; stale evidence is never reused.
+- Routing the same model to several roles does not break independence: identity is protected by `run-role.sh`'s process-owned run ID and the per-role registration (F04); role separation is enforced as is.
 
-## 8. Bütçe anlamları: sert mi, danışma mı
+## 8. Budget semantics: hard or advisory
 
-| Sınır | Ayar | Sınıf | Ne zaman |
+| Limit | Setting | Class | When |
 |---|---|---|---|
-| Ajan çağrısı sayısı | `MAX_SPAWNS` | **sert** | süreç başlamadan önce sayılır |
-| Deneme sayısı | `ROUTE_MAX_ATTEMPTS`, `ROUTE_MAX_RETRIES`, `ROUTE_MAX_ESCALATIONS` | **sert** | karar anında |
-| Görev token bütçesi | `TOKEN_BUDGET_TASK` | sert **yalnızca** önceki tüm çalıştırmaların kullanımı raporlandıysa ve adaptör kullanım bildiriyorsa; aksi halde **danışma** | yeni çalıştırma bütçedeyken veya üstündeyken başlamaz; çalışan süreç kesilmez |
-| Rol token bütçesi | `ROUTE_ROLE_TOKENS` | aynı | aynı |
-| Süre | `ROUTE_TIMEOUT_S` | `timeout`/`gtimeout` varsa **sert**, yoksa danışma (kayıt) | süreç sarmalayıcıyla |
-| Parasal | `ROUTE_BUDGET_COST` | **her zaman danışma**: kullanıcı `pricing.json` + token kullanımından **tahmin**; hiçbir adaptör gerçek maliyet bildirmez | uyarı üretir, durdurmaz |
+| Agent call count | `MAX_SPAWNS` | **hard** | counted before the process starts |
+| Attempt count | `ROUTE_MAX_ATTEMPTS`, `ROUTE_MAX_RETRIES`, `ROUTE_MAX_ESCALATIONS` | **hard** | at decision time |
+| Task token budget | `TOKEN_BUDGET_TASK` | hard **only** if the usage of every previous run was reported and the adapter reports usage; otherwise **advisory** | a new run does not start when at or over budget; a running process is not killed |
+| Role token budget | `ROUTE_ROLE_TOKENS` | same | same |
+| Duration | `ROUTE_TIMEOUT_S` | **hard** if `timeout`/`gtimeout` exists, otherwise advisory (recorded) | via the process wrapper |
+| Monetary | `ROUTE_BUDGET_COST` | **always advisory**: an **estimate** from the user's `pricing.json` + token usage; no adapter reports actual cost | produces a warning, does not stop |
 
-Hesap kuralları: kullanım bildirmeyen çalıştırma **sıfır sayılmaz**, "ölçülmedi" sayılır (`usage.jsonl` satırında `tq:"unavailable"`, `routing.jsonl` sonucunda `tokens:null`).
-Hepsi ölçülmediyse `used:null`; bir kısmı ölçülmediyse `accounting:"partial"` ve rakam alt sınırdır (`USAGE_PARTIAL`). Tahmini ve gerçek maliyet ayrı alanlardır (`estimated_usd` / `actual_usd:null`).
+Accounting rules: a run that reports no usage is **not counted as zero**; it counts as "not measured" (`tq:"unavailable"` in the `usage.jsonl` line, `tokens:null` in the `routing.jsonl` outcome).
+If nothing was measured, `used:null`; if some runs were not measured, `accounting:"partial"` and the figure is a lower bound (`USAGE_PARTIAL`). Estimated and actual cost are separate fields (`estimated_usd` / `actual_usd:null`).
 
-Bütçe tükenince: `BUDGET_EXHAUSTED` (exit 3), faz/durum değişmez, kanıt yazılmaz. Kurtarma: sınırı `sdkit.local.env`'de yükseltin (kayıp yok) veya kullanıcı onayıyla `--ignore-budget`
-(yalnızca `SDD_MODE=strict`'te anlamlı; karar `BUDGET_OVERRIDDEN` uyarısıyla kaydedilir). `SDD_MODE=guided` yalnızca uyarır, `off` bütçeyi hiç değerlendirmez (eski davranışla aynı).
+When the budget runs out: `BUDGET_EXHAUSTED` (exit 3), the phase/state does not change, no evidence is written. Recovery: raise the limit in `sdkit.local.env` (nothing is lost) or, with user approval, use `--ignore-budget`
+(meaningful only with `SDD_MODE=strict`; the decision is recorded with a `BUDGET_OVERRIDDEN` warning). `SDD_MODE=guided` only warns, and `off` does not evaluate the budget at all (same as the old behaviour).
 
-## 9. Ayarlar
+## 9. Settings
 
-Tümü isteğe bağlıdır; yalnızca `ROUTING=on` gerekir. Paylaşılan olanlar `sdkit.env`'de, kişisel sınırlar `sdkit.local.env`'de.
+All are optional; only `ROUTING=on` is needed. Shared ones go in `sdkit.env`, personal limits in `sdkit.local.env`.
 
 ```
-ROUTING=on                      # off (varsayılan): run-role.sh eskisi gibi çalışır
-ROUTE_POLICY=tiered|fixed       # fixed + ROUTE_FIXED_MODEL=<kayıt id>: tekrarlanabilir deneyler için tek model
-ROUTE_DOWNGRADE_LOW=0           # 1: düşük riskli iş rolleri bir kademe ucuza (varsayılan kapalı; F05 ölçümü gelene dek)
-ROUTE_FLOOR_LOW/MEDIUM/HIGH     # risk başına en düşük kademe (light, light, standard)
-ROUTE_FALLBACK_HOSTS="codex"    # seçilen ana makine çalışamazsa sırayla denenecekler
+ROUTING=on                      # off (default): run-role.sh works as before
+ROUTE_POLICY=tiered|fixed       # fixed + ROUTE_FIXED_MODEL=<entry id>: one model for reproducible experiments
+ROUTE_DOWNGRADE_LOW=0           # 1: low-risk work roles one tier cheaper (off by default; until the F05 measurement)
+ROUTE_FLOOR_LOW/MEDIUM/HIGH     # lowest tier per risk (light, light, standard)
+ROUTE_FALLBACK_HOSTS="codex"    # tried in order if the selected host cannot run
 ROUTE_MAX_RETRIES=2  ROUTE_MAX_ESCALATIONS=1  ROUTE_ESCALATE_TO=strong  ROUTE_MAX_ATTEMPTS=4  ROUTE_BACKOFF_S=10
-ROUTE_PREFER_DEVELOPER=claude:standard      # rol başına tercih (kayıt id); gereken kademeyi sağlamak zorunda
-ROUTE_ROLE_TOKENS=  ROUTE_TIMEOUT_S=  ROUTE_BUDGET_COST=   # kişisel sınırlar
+ROUTE_PREFER_DEVELOPER=claude:standard      # per-role preference (entry id); must meet the required tier
+ROUTE_ROLE_TOKENS=  ROUTE_TIMEOUT_S=  ROUTE_BUDGET_COST=   # personal limits
 ```
 
-Açık geçersiz kılma: `run-role.sh --model M` yalnızca kayıt defterinde olan, kullanılabilir, gereken katmana eşit/üstü bir model olabilir; aksi halde `OVERRIDE_INVALID` / `OVERRIDE_BELOW_FLOOR`.
-Hiçbir geçersiz kılma risk tabanını, kanıt kuralını veya zorunlu rolü aşmaz.
+Explicit override: `run-role.sh --model M` accepts only a model that is in the registry, available, and at or above the required tier; otherwise `OVERRIDE_INVALID` / `OVERRIDE_BELOW_FLOOR`.
+No override bypasses the risk floor, the evidence rule or a mandatory role.
 
-İnceleme (LLM çağırmaz, hiçbir şey kaydetmez):
+Inspection (calls no LLM, records nothing):
 
 ```
 $ route.sh explain --role developer --risk medium
@@ -221,98 +221,98 @@ Budget: attempts=hard
 Policy: route-v1  Routing: on
 ```
 
-Diğer komutlar: `route.sh decide --json`, `outcome`, `classify`, `registry`, `capabilities`, `validate`, `log`.
+Other commands: `route.sh decide --json`, `outcome`, `classify`, `registry`, `capabilities`, `validate`, `log`.
 
-## 10. Varsayılan yönlendirme matrisi (ölçüm iddiası yok)
+## 10. Default routing matrix (no measurement claim)
 
-Bunlar **muhafazakâr varsayılanlardır**, ölçülmüş kalite/maliyet sonucu değildir. Model sütunu `core/tiers.env` ile claude içindir; diğer ana makineler §4'e göre.
+These are **conservative defaults**, not measured quality/cost results. The model column is for claude through `core/tiers.env`; other hosts follow §4.
 
-| Rol (sınıf) | Düşük risk | Orta risk | Yüksek risk | Tekrarlı hata |
+| Role (class) | Low risk | Medium risk | High risk | Repeated failure |
 |---|---|---|---|---|
-| developer, test-writer, devsecops (iş) | standard (`ROUTE_DOWNGRADE_LOW=1` ile light) | standard | standard (`ROUTE_FLOOR_HIGH` ile üstü) | bir üst kademe, `ROUTE_ESCALATE_TO`'ya kadar |
-| engineer, orchestrator (iş) | strong | strong | strong | zaten tavan |
-| scout (arama) | light | light | light | — |
-| analyst (arama) | standard | standard | standard | — |
-| verifier (kapı) | standard | standard | **strong** (derin katman) | bir üst kademe |
-| reviewer, security-auditor (kapı) | standard | standard | standard | bir üst kademe |
+| developer, test-writer, devsecops (work) | standard (light with `ROUTE_DOWNGRADE_LOW=1`) | standard | standard (higher with `ROUTE_FLOOR_HIGH`) | one tier up, up to `ROUTE_ESCALATE_TO` |
+| engineer, orchestrator (work) | strong | strong | strong | already at the ceiling |
+| scout (lookup) | light | light | light | — |
+| analyst (lookup) | standard | standard | standard | — |
+| verifier (gate) | standard | standard | **strong** (deep tier) | one tier up |
+| reviewer, security-auditor (gate) | standard | standard | standard | one tier up |
 
-Kapı rolleri hiçbir koşulda kendi katmanının altına inmez. Düşük riskte ucuzlatma varsayılan olarak kapalıdır: F05-B sonuçları olmadan "tasarruf" iddia edilmez.
+Gate roles never go below their own tier, under any condition. Downgrading at low risk is off by default: no "savings" are claimed without F05-B results.
 
-**Token etkisi**: zorunlu model çağrısı eklenmez (kararlar saf kabuk+jq). Gerçek model çağrısı **azalabilir** (geçerli kanıt yeniden kullanılır, kopya çalıştırma engellenir, BLOCK'lu diff'e boşuna doğrulama yapılmaz),
-ama bu bir ölçüm değildir. Ölçülen belirleyici ek yük: bir `decide` ~0,4 sn duvar saati (macOS, ~50 yerel süreç), `run-role.sh` başına bir satır stderr. Rakamlar `tests/route.test.sh`'da değil, elle ölçüldü.
+**Token impact**: no mandatory model call is added (decisions are pure shell+jq). Real model calls **may go down** (valid evidence is reused, duplicate runs are blocked, no wasted verification on a diff with a BLOCK),
+but this is not a measurement. Measured deterministic overhead: one `decide` ~0.4 s wall clock (macOS, ~50 local processes), one stderr line per `run-role.sh`. The figures were measured by hand, not in `tests/route.test.sh`.
 
-### Gecikme ölçümü (F06.1; macOS, bash 3.2, `jq` 1.8, 15 tekrar, medyan; yalnızca yerel süreçler)
+### Latency measurement (F06.1; macOS, bash 3.2, `jq` 1.8, 15 repeats, median; local processes only)
 
-| Parça | ms |
+| Part | ms |
 |---|---|
-| boş `bash -c :` / tek `jq` / tek `git` | 26 / 27 / 46 |
-| `env.sh` ayar yükleme | 24 |
-| kayıt defteri kurma (`route.sh registry`) | 78 |
-| `workflow.sh policy --json` (görev gerçekleri) | 57 |
-| `sdd.sh evidence --json --with-fingerprint` (yalnızca kapı rolleri; diff hash'i + kanıt durumu) | ~310 |
-| `decide`: ayar+kayıt defteri (aşama A) / +rol+görev gerçekleri (B) / +katman+model+bütçe (C) | 155 / 283 / 643 → optimizasyon sonrası ~520 |
-| `decide`, kapı rolü, açık yüksek riskli görev | 1112 → **~920** |
-| `decide --reserve` (kilit + defter yazımı dahil, aşama dışı) | ~750 (önceki ölçüm) |
+| empty `bash -c :` / a single `jq` / a single `git` | 26 / 27 / 46 |
+| `env.sh` settings load | 24 |
+| registry build (`route.sh registry`) | 78 |
+| `workflow.sh policy --json` (task facts) | 57 |
+| `sdd.sh evidence --json --with-fingerprint` (gate roles only; diff hash + evidence state) | ~310 |
+| `decide`: settings+registry (stage A) / +role+task facts (B) / +tier+model+budget (C) | 155 / 283 / 643 → ~520 after optimization |
+| `decide`, gate role, open high-risk task | 1112 → **~920** |
+| `decide --reserve` (including lock + ledger write, outside the stages) | ~750 (earlier measurement) |
 | `outcome` / `classify` | ~48 |
 
-Darboğaz: (1) aynı diff'in iki kez hash'lenmesi ve (2) karar değerlendirmesindeki çok sayıda küçük `jq` süreci (~25 ms/süreç). Düzeltilenler: tek `sdd.sh` çağrısı (durum + parmak izi), kayıt defterinin karar başına bir kez kurulması,
-adaptör/model alanlarının tek `jq`'da okunması, not/uyarı listelerinin tek `jq`'da dizilenmesi. Davranış değişmedi (213 test aynı). Kalan süre çoğunlukla süreç başlatma (macOS) ve zorunlu `sdd.sh evidence`; daha fazlası ancak kabuk yerine tek bir ikili/dil gerektirir ve kapsam dışıdır.
-Karşılaştırma için: bir model çağrısı saniyeler sürer; karar başına maliyet token değil duvar saatidir.
+Bottleneck: (1) hashing the same diff twice and (2) the many small `jq` processes in decision evaluation (~25 ms/process). Fixed: a single `sdd.sh` call (state + fingerprint), the registry built once per decision,
+adapter/model fields read in one `jq`, note/warning lists assembled in one `jq`. Behaviour did not change (the same 213 tests). The remaining time is mostly process startup (macOS) and the mandatory `sdd.sh evidence`; going further would need a single binary/language instead of shell and is out of scope.
+For comparison: a model call takes seconds; the cost per decision is wall clock, not tokens.
 
-## 11. Benchmark uyumu (F05)
+## 11. Benchmark compatibility (F05)
 
-- `ROUTING` varsayılanı `off`; `bench/` stratejileri, görevleri ve baz sonuçları değişmedi, tarihî yapılandırmalar yeni yönlendirmeyi **etkinleştirmez**.
-- Yönlendirme sürümlüdür (`policy_version: route-v1`); her karar `routing.jsonl`'da ve (TELEMETRY=1) `workflow.decision` olayında (`source=routing`) saklanır: bir koşu yeniden kurulabilir.
-- Sabit model deneyleri: `ROUTE_POLICY=fixed` + `ROUTE_FIXED_MODEL` (tabanları yine düşürmez; kapı rolü için yetersizse `FIXED_BELOW_FLOOR` ile reddedilir).
-- Ücretli benchmark otomatik çalıştırılmaz. Ucuzlatma kalibrasyonu F05-B sonuçları gelince yapılacaktır.
-- F06.1 denetimi (2026-10-31): bu çalışma kopyasında F05-B sonuç dizini yok (yalnızca F05-A altyapısı ve simüle fikstürler), karşılaştırılabilir ölçüm bulunmadığı için `ROUTE_DOWNGRADE_LOW` **kapalı** kaldı (şablon `0`, testle sabitlendi). `bench/` altında `ROUTING` hiçbir yerde geçmez: tarihî yapılandırmalar yönlendirmeyi etkinleştirmez.
+- `ROUTING` defaults to `off`; the `bench/` strategies, tasks and baseline results did not change, and historical configurations do **not enable** the new routing.
+- Routing is versioned (`policy_version: route-v1`); every decision is stored in `routing.jsonl` and (with TELEMETRY=1) in a `workflow.decision` event (`source=routing`): a run can be reconstructed.
+- Fixed-model experiments: `ROUTE_POLICY=fixed` + `ROUTE_FIXED_MODEL` (still does not lower the floors; refused with `FIXED_BELOW_FLOOR` if it is not enough for a gate role).
+- A paid benchmark is never run automatically. Downgrade calibration will be done once F05-B results are in.
+- F06.1 audit (2026-10-31): there is no F05-B results directory in this working copy (only the F05-A infrastructure and simulated fixtures); since there is no comparable measurement, `ROUTE_DOWNGRADE_LOW` stayed **off** (template `0`, pinned by a test). `ROUTING` appears nowhere under `bench/`: historical configurations do not enable routing.
 
-## 12. Geriye uyumluluk ve güven sınırları
+## 12. Backward compatibility and trust boundaries
 
-Zorlanan (kod reddeder/kaydeder): `run-role.sh` yolunda karar tüketimi; `route.sh` yoksa çalışmama; kapı rolü katman tabanı; BLOCK'un aynı diff'te yeniden yargılanmaması; kopya/uçuştaki istek engeli (kilit altında);
-spawn ve deneme sayısı; token sınırı (kullanım raporlanıyorsa); ayar ve kayıt doğrulaması; açık model geçersiz kılma doğrulaması.
+Enforced (code refuses/records): decision consumption on the `run-role.sh` path; not running if `route.sh` is missing; the tier floor for gate roles; a BLOCK is not re-judged on the same diff; duplicate/in-flight requests are blocked (under a lock);
+spawn and attempt counts; the token limit (if usage is reported); settings and registry validation; validation of explicit model overrides.
 
-Danışma / el ile: adaptör yetenekleri (`declared`, canlı doğrulanmadı); token sınırı kullanım raporlanmıyorsa; parasal sınır; süre sınırı `timeout` komutu yoksa; ana makinenin yerel alt ajanlarını (Codex, OpenCode, Cursor, Gemini) çağıran akışlar —
-bunlar `run-role.sh`'ı kullanmaz, yönlendirmeyi yalnızca `route.sh explain` ile elle danışarak izler. Claude Code'da PreToolUse(Agent) hook'u `ROUTING=on` iken `route.sh` önizlemesini sorar
-(yeniden kullanım/duran BLOCK/kopya/kat tabanının altındaki `model` için `ask`); model parametresi verilmemişse oturum varsayılanı kullanılır ve denetlenemez.
+Advisory / manual: adapter capabilities (`declared`, not verified live); the token limit if usage is not reported; the money limit; the duration limit if there is no `timeout` command; flows that call the host's native subagents (Codex, OpenCode, Cursor, Gemini) —
+these do not use `run-role.sh` and follow routing only by consulting `route.sh explain` by hand. On Claude Code, the PreToolUse(Agent) hook asks for a `route.sh` preview when `ROUTING=on`
+(`ask` for reuse/a standing BLOCK/a duplicate/a `model` below the tier floor); if no model parameter is given, the session default is used and cannot be checked.
 
-### Zorlanan mı, danışma mı: yönlendirmeyi atlatabilen yollar (F06.1 denetimi)
+### Enforced or advisory: paths that can bypass routing (F06.1 audit)
 
-Kalite kapıları (`sdd.sh advance`: kanıt kapısı, risk tabanı, faz geçişleri) yönlendirmeden **bağımsızdır**: yönlendirme kapalı, atlatılmış veya yanlış olsa bile ilerleme anında aynen denetlenir (F04 testleri yönlendirmeyi hiç içermez ve geçer).
-Yönlendirme yalnızca *hangi model/ne zaman/ne kadar* sorusunu etkiler. Yollar:
+The quality gates (`sdd.sh advance`: the evidence gate, the risk floor, phase transitions) are **independent** of routing: even if routing is off, bypassed or wrong, they are checked exactly the same at advance time (the F04 tests do not involve routing at all and pass).
+Routing only affects *which model / when / how much*. The paths:
 
-| Yol | Model katmanı tabanı | Bütçe (spawn/token) | Kopya/yeniden kullanım | Kanıt kapısı |
+| Path | Model tier floor | Budget (spawn/token) | Duplicate/reuse | Evidence gate |
 |---|---|---|---|---|
-| `run-role.sh`, `ROUTING=on` | **zorlanır** (kod reddeder) | **zorlanır** (kullanım raporlandıkça) | **zorlanır** | zorlanır (`sdd.sh`) |
-| `run-role.sh`, `ROUTING=off` (varsayılan) | eski kurallar (`--tier` tabanı) | eski kurallar (`MAX_SPAWNS`/`TOKEN_BUDGET_TASK`) | yok | zorlanır |
-| Claude Code `Agent` aracı, `ROUTING=on` | **danışma**: hook `model` parametresi varsa sorar; parametre yoksa oturum modeli, denetlenemez | hook sayar ve sorar (`guard-budget`) | hook sorar (kullanıcı geçebilir) | zorlanır |
-| Claude Code `Agent` aracı, `ROUTING=off` | yok | hook (`MAX_SPAWNS` doluysa) | yok | zorlanır |
-| Codex/OpenCode/Cursor/Gemini yerel alt ajanları | **yok** (yalnızca `route.sh explain` ile elle) | yok | yok | zorlanır (el ile kayıt "manual" sayılır, yüksek riskte kabul edilmez) |
-| ana makine CLI'ını doğrudan çalıştırmak | yok | yok | yok | zorlanır |
-| `sdkit.env`'de `ROUTING=off` yapmak | tüm yönlendirmeyi kapatır: **sdkit.env korumalı değil**; `PROTECTED_PATHS`'e ekleyin | — | — | zorlanır |
+| `run-role.sh`, `ROUTING=on` | **enforced** (the code refuses) | **enforced** (as far as usage is reported) | **enforced** | enforced (`sdd.sh`) |
+| `run-role.sh`, `ROUTING=off` (default) | old rules (`--tier` floor) | old rules (`MAX_SPAWNS`/`TOKEN_BUDGET_TASK`) | none | enforced |
+| Claude Code `Agent` tool, `ROUTING=on` | **advisory**: the hook asks if a `model` parameter is present; without one the session model is used and cannot be checked | the hook counts and asks (`guard-budget`) | the hook asks (the user can pass) | enforced |
+| Claude Code `Agent` tool, `ROUTING=off` | none | hook (if `MAX_SPAWNS` is full) | none | enforced |
+| Codex/OpenCode/Cursor/Gemini native subagents | **none** (only by hand with `route.sh explain`) | none | none | enforced (a manual record counts as "manual" and is not accepted at high risk) |
+| running the host CLI directly | none | none | none | enforced |
+| setting `ROUTING=off` in `sdkit.env` | turns off all routing: **sdkit.env is not protected**; add it to `PROTECTED_PATHS` | — | — | enforced |
 
-`ROUTING` değeri `on|off` dışındaysa `run-role.sh` reddeder (sessizce kapalı saymaz). `--ignore-budget` yalnızca bütçeyi aşar; BLOCK, tavan, zorunlu rol ve kanıt kurallarını aşmaz.
+If the `ROUTING` value is anything other than `on|off`, `run-role.sh` refuses (it does not silently treat it as off). `--ignore-budget` only overrides the budget; it does not override BLOCK, the ceiling, mandatory-role and evidence rules.
 
-Kabul edilen sınırlar:
-- Zincir anahtarı handoff metninin özetidir: handoff'u değiştirmek yeni bir istektir. Bu, kazara döngüleri önler; kötü niyetli bir orkestratörü değil. Kapı kanıtı ve duran BLOCK diff parmak izine bağlıdır, handoff'a değil.
-- Orta ve düşük riskte reviewer/security-auditor cevapları serbest biçimlidir ve kanıt olarak kaydedilmez; onların BLOCK'u `outcome`'a yansımaz (yalnızca yüksek riskte).
-- `--ignore-budget` kullanıcı onayı varsayar; kod bunu doğrulayamaz (eski davranışla aynı).
-- Süreç canlılığı `kill -0` ile bakılır; başka kullanıcının süreci "ölü" görünür. Pid'siz kayıtlar `ROUTE_INFLIGHT_TTL_S` sonra bırakılır.
-- Hiçbir adaptör canlı CLI'a karşı doğrulanmadı (`run-role.sh` başlığındaki UNVERIFIED notu geçerli).
-- Ana makine varsayılan modeli çalışırsa (cursor/gemini için boş katman modeli) katman doğrulanamaz; karar bunu `tier_enforced:false` ile söyler.
+Accepted limits:
+- The chain key is a digest of the handoff text: changing the handoff makes a new request. This prevents accidental loops, not a malicious orchestrator. Gate evidence and a standing BLOCK are tied to the diff fingerprint, not to the handoff.
+- At medium and low risk, reviewer/security-auditor answers are free-form and are not recorded as evidence; their BLOCK is not reflected in `outcome` (only at high risk).
+- `--ignore-budget` assumes user approval; the code cannot verify it (same as the old behaviour).
+- Process liveness is checked with `kill -0`; another user's process looks "dead". Records without a pid are released after `ROUTE_INFLIGHT_TTL_S`.
+- No adapter has been verified against a live CLI (the UNVERIFIED note in the `run-role.sh` header applies).
+- If the host's default model runs (an empty tier model for cursor/gemini), the tier cannot be verified; the decision says so with `tier_enforced:false`.
 
-## 13. Testler
+## 13. Tests
 
-`tests/route.test.sh` (model çağrısı yok; yalnızca sahte CLI): yapılandırma ve kayıt, risk/rol/yetenek yönlendirme, geçersiz kılma ve tercihler, sabit politika, yedek ana makine, zorunlu/isteğe bağlı rol, kanıt yeniden kullanımı ve bayatlığı,
-kopya ve eşzamanlı istek, hata sınıfları ile yeniden deneme/yükseltme sınırları, sert/danışma bütçe ayrımı, ölçülmeyen kullanım, maliyet tahmini, bütçe kurtarma, `run-role.sh` bütünleşmesi,
-telemetri, Claude Code hook'u, yönlendirme kapalıyken eski davranış, benchmark dosyalarının değişmemesi.
+`tests/route.test.sh` (no model calls; fake CLIs only): configuration and registry, risk/role/capability routing, overrides and preferences, fixed policy, fallback host, mandatory/optional roles, evidence reuse and staleness,
+duplicate and concurrent requests, failure classes with retry/escalation limits, the hard/advisory budget split, unmeasured usage, cost estimate, budget recovery, `run-role.sh` integration,
+telemetry, the Claude Code hook, the old behaviour when routing is off, benchmark files unchanged.
 
-## F14 — Sert maliyet politikası (varsayılan kapalı)
-`ROUTE_COST_ENFORCE=hard` parasal sınırları **harcama sınırında durdurucu** yapar (varsayılan `off`: eski gibi yalnız danışma). Sınırlar: `ROUTE_BUDGET_COST` (görev), `ROUTE_ROLE_BUDGET_COST` (rol), `ROUTE_PROJECT_BUDGET_COST` (tüm açık/arşivli görevler). `ROUTE_RESERVE_USD` her başlayan koşu için rezervasyon tutar (`work/<slug>/reservations.jsonl`); `route.sh outcome` rezervasyonu serbest bırakır ve gerçek harcama kullanım defterinde kalır (mutabakat). Tutar yalnız kullanıcının `pricing.json`'undan **tahmindir**, fatura değildir. **Bilinmeyen asla geçmez**: kapsamda ölçülmemiş/fiyatsız koşu varsa veya seçilen modelin fiyatı yoksa karar `BUDGET_EXHAUSTED` (exit 3) olur; zorunlu roller atlanmaz, PASS yazılmaz; `--ignore-budget` (kullanıcı onayı) `BUDGET_OVERRIDDEN` uyarısıyla kaydedilir. Ek LLM çağrısı yoktur. `tests/costroute.test.sh`.
+## F14 — Hard cost policy (off by default)
+`ROUTE_COST_ENFORCE=hard` makes the monetary limits **stop at the spending limit** (default `off`: advisory only, as before). Limits: `ROUTE_BUDGET_COST` (task), `ROUTE_ROLE_BUDGET_COST` (role), `ROUTE_PROJECT_BUDGET_COST` (all open/archived tasks). `ROUTE_RESERVE_USD` holds a reservation for every run that starts (`work/<slug>/reservations.jsonl`); `route.sh outcome` releases the reservation and the real spend stays in the usage ledger (reconciliation). The amount is an **estimate** from the user's `pricing.json` only, not a bill. **Unknown never passes**: if there is an unmeasured/unpriced run in scope or the chosen model has no price, the decision is `BUDGET_EXHAUSTED` (exit 3); mandatory roles are not skipped, no PASS is written; `--ignore-budget` (user approval) is recorded with a `BUDGET_OVERRIDDEN` warning. There is no extra LLM call. `tests/costroute.test.sh`.
 
-### F14 — Kararlılık düzeltmeleri (sert politika)
-- **Sayılar sıkı doğrulanır**: `1.2.3`, `.`, `1e5`, boş/negatif değer yapılandırma hatasıdır (çıkış 2); sert modda `jq`/hesap hatası da kapalı-başarısız (`CONFIG_INVALID`, `--ignore-budget` ile aşılamaz).
-- **Rezervasyon > 0 olmak zorunda**: `ROUTE_RESERVE_USD` verilmezse `ROUTE_ROLE_TOKENS`/`TOKEN_BUDGET_TASK` × modelin en pahalı oranı ile türetilir (dayanak kararda `reservation_basis`); türetilemezse durur.
-- **Tek fiyat çözücü**: `route.sh` ve `usage.sh` aynı `SDKIT_PRICE_JQ` (env.sh) ile fiyatlar: tam model kimliği, yoksa `-YYYYMMDD` ekisiz kimlik; sağlayıcı; geçerlilik penceresi.
-- **Proje kilidi**: sert modda karar `work/.project-budget.lock` altında verilir (önce proje, sonra görev kilidi); bütçe okuma + rezervasyon tek adımdır. Paralel görevler toplamda proje sınırını aşamaz (`tests/reservation.test.sh`).
-- **Rezervasyon ömrü**: `run-role.sh` her çıkışta (başarı, hata, ret, SIGINT/SIGTERM) kararı kapatır; serbest bırakma idempotenttir. `ROUTE_RESERVE_TTL_S` (3600) aşıldığında **ve** sahibi süreç yoksa bayat sayılır (`route.sh reservations [list|expire]`, `recover.sh apply`); yaşayan süreç rezervasyonunu korur.
+### F14 — Stability fixes (hard policy)
+- **Numbers are validated strictly**: `1.2.3`, `.`, `1e5`, an empty/negative value is a configuration error (exit 2); in hard mode a `jq`/arithmetic error also fails closed (`CONFIG_INVALID`, cannot be bypassed with `--ignore-budget`).
+- **The reservation must be > 0**: if `ROUTE_RESERVE_USD` is not given, it is derived from `ROUTE_ROLE_TOKENS`/`TOKEN_BUDGET_TASK` × the model's most expensive rate (the basis is in the decision as `reservation_basis`); if it cannot be derived, it stops.
+- **One price resolver**: `route.sh` and `usage.sh` price with the same `SDKIT_PRICE_JQ` (env.sh): the exact model ID, else the ID without a `-YYYYMMDD` suffix; the provider; the validity window.
+- **Project lock**: in hard mode the decision is made under `work/.project-budget.lock` (project first, then the task lock); reading the budget + reserving is one step. Parallel tasks cannot exceed the project limit in total (`tests/reservation.test.sh`).
+- **Reservation lifetime**: `run-role.sh` closes the decision on every exit (success, error, refusal, SIGINT/SIGTERM); releasing is idempotent. A reservation is stale when `ROUTE_RESERVE_TTL_S` (3600) is exceeded **and** its owner process is gone (`route.sh reservations [list|expire]`, `recover.sh apply`); a living process keeps its reservation.

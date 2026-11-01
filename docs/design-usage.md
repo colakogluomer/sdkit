@@ -1,107 +1,107 @@
-# Kullanım ve maliyet muhasebesi (F07)
+# Usage and cost accounting (F07)
 
-`usage.sh` defteri artık eksiksiz, tekilleştirilmiş, model farkında ve yeniden hesaplanabilir. Hiçbir LLM çağrısı yok; fiyat ve kullanım **uydurulmaz**. Doğrulama: `tests/usage.test.sh`.
+The `usage.sh` ledger is now complete, deduplicated, model-aware and recomputable. There are no LLM calls; prices and usage are **never invented**. Verification: `tests/usage.test.sh`.
 
-## 1. Kök neden analizi
+## 1. Root cause analysis
 
-Kod okunarak ve gerçek Claude Code transkriptleri (`~/.claude/projects`) üzerinde ölçülerek bulundu.
+Found by reading the code and measuring real Claude Code transcripts (`~/.claude/projects`).
 
-| # | Belirti | Kök neden | Kanıt |
+| # | Symptom | Root cause | Evidence |
 |---|---|---|---|
-| R1 | Alt agent çıktı token'ları eksik | `hooks/usage-log.sh` mesaj başına `unique_by(.id)` ile **ilk** tekrarı tutuyordu; akışlı mesaj aynı `id` ile büyüyen `output_tokens` ile tekrarlanır | 6177 tekrarlı mesaj kimliğinden 853'ünde değerler farklı; alt agent transkriptlerinde çıktı **%31,4 eksik** (1.904.471 → 2.776.239). Örnek agent: 6.544 yerine 16.165 |
-| R2 | Mesajlar silinebilir | Kimliği olmayan mesajlar tek grupta birleşirdi (`unique_by` null anahtar) | kod okuma; testle sabitlendi |
-| R3 | Ana oturum usage'ı alt agent'a yazılabilir | `SubagentStop` için `agent_transcript_path // transcript_path`: yol yoksa **ana** transkript okunur, tüm oturum alt agent rolüne (ör. analyst) yazılırdı | kod okuma. Alt agent transkriptleri ayrı dosyada: `<oturum>/subagents/agent-<id>.jsonl` (+ `.meta.json`) |
-| R4 | Eksik agent yürütmeleri (ör. analyst) | Transkript okunamazsa hook sessizce çıkıyordu; `run-role.sh` host hata verince (rc≠0, zaman aşımı) hiç satır yazmıyordu. Boşluk görünmezdi | kod okuma |
-| R5 | Orkestratör eksik/yarım | Orkestratör yalnızca `Stop`'ta (tur sonu) anlık görüntü alır; kesilen oturumda hiç yazılmaz. Anlık görüntü ile son kayıt ayrımı yoktu: geç/küçük bir görüntü büyüğünü ezebilirdi | kod okuma |
-| R6 | Model bazında maliyet yok | Satır başına tek model (son görülen); oturum model değiştirirse tümü son modelin fiyatından. Sağlayıcı, oturum, köken alanı yoktu | defter şeması v1 |
-| R7 | `cost_est` 0 / hiç yok | `usage.sh report` maliyet hesaplamıyordu. Fiyat yalnızca `telemetry.sh`/`route.sh`'ta, düz `{model:{in,out}}` biçiminde, tarih/sağlayıcı yok, tablo yoksa sessizce "unavailable" | kod okuma |
-| R8 | Önbellek oranı doğrulanmamış | Formül doğru (`cache_read/(in+cache_read+cache_write)`) ama testsiz, `floor` yüzdesi, kısmi/tekrarlı satırları dışlamıyordu | `tests/usage.test.sh` elle hesaplı |
-| R9 | Proje toplamı yok | Kapanışta `work/<slug>` silinir; rapor yalnızca açık görevleri toplardı | `telemetry.sh archive` zaten `_archive/<slug>.usage.jsonl` kopyalıyor, rapor okumuyordu |
+| R1 | Sub-agent output tokens missing | `hooks/usage-log.sh` kept the **first** duplicate per message with `unique_by(.id)`; a streamed message repeats under the same `id` with a growing `output_tokens` | In 6177 duplicated message IDs, 853 have differing values; in sub-agent transcripts output is **31.4% short** (1,904,471 → 2,776,239). Example agent: 16,165 instead of 6,544 |
+| R2 | Messages can be dropped | Messages without an ID were merged into one group (`unique_by` null key) | code reading; pinned by a test |
+| R3 | Main-session usage can be written to a sub-agent | For `SubagentStop`, `agent_transcript_path // transcript_path`: with no path, the **main** transcript is read and the whole session is written to the sub-agent role (e.g. analyst) | code reading. Sub-agent transcripts live in a separate file: `<session>/subagents/agent-<id>.jsonl` (+ `.meta.json`) |
+| R4 | Missing agent runs (e.g. analyst) | If the transcript could not be read, the hook exited silently; when the host failed (rc≠0, timeout), `run-role.sh` wrote no row at all. The gap was invisible | code reading |
+| R5 | Orchestrator missing/partial | The orchestrator takes a snapshot only on `Stop` (end of turn); nothing is written in an interrupted session. There was no distinction between a snapshot and a final record: a late/small snapshot could overwrite a larger one | code reading |
+| R6 | No per-model cost | One model per row (the last seen); if the session switches models, everything is priced at the last model. No provider, session or origin fields | ledger schema v1 |
+| R7 | `cost_est` 0 / absent | `usage.sh report` did not compute cost. Prices lived only in `telemetry.sh`/`route.sh`, in a flat `{model:{in,out}}` form, with no date/provider, and silently "unavailable" when the table was missing | code reading |
+| R8 | Cache ratio unverified | The formula is correct (`cache_read/(in+cache_read+cache_write)`) but untested, used a `floor` percentage, and did not exclude partial/duplicated rows | `tests/usage.test.sh`, hand-computed |
+| R9 | No project total | `work/<slug>` is deleted on close; the report summed only open tasks | `telemetry.sh archive` already copies `_archive/<slug>.usage.jsonl`, but the report did not read it |
 
-R1'in etkisi: ana oturum transkriptlerinde tekrarlar çoğunlukla aynıdır (ölçülen örnekte eski ve yeni sonuç eşit); fark alt agent transkriptlerinde (akış ara değerleri) çıkar.
+Effect of R1: in main-session transcripts the duplicates are mostly identical (in the measured example the old and new results are equal); the difference shows up in sub-agent transcripts (intermediate streaming values).
 
-## 2. Defter (`work/<slug>/usage.jsonl`) – şema v2
+## 2. Ledger (`work/<slug>/usage.jsonl`) – schema v2
 
-Eski alanlar aynen durur; yeni alanlar eklemelidir (eksikse eski satır sayılır).
+The old fields stay as they are; the new fields are additive (a row without them counts as an old row).
 
-| Alan | Anlam |
+| Field | Meaning |
 |---|---|
-| `in` | **önbellek hariç** giriş token'ı |
-| `out`, `cache_read`, `cache_write` | çıkış, önbellekten okunan, önbelleğe yazılan |
-| `model`, `provider` | model kimliği; sağlayıcı yalnızca kaynaktan görülürse (`msg_bdrk_`→bedrock, `msg_vrtx_`→vertex, `msg_`→anthropic), yoksa boş |
-| `role`, `tier`, `host`, `ts` | rol, katman, host, UTC zaman |
-| `session` | oturum kimliği |
-| `id` | kararlı **yürütme kimliği** (alt agent: `agent_id`; orkestratör: `session-<oturum>`; `run-role`: `rr-…`) |
-| `origin` | `sdk` (hook / run-role kaydetti) veya `observed` (`usage.sh scan` transkriptten okudu) |
-| `kind` | `snapshot` (artabilir) veya `final` (bitti) |
-| `status` | `interrupted` (yarıda kalan koşu) |
-| `tq` | `unavailable`: token okunamadı; sıfırlar **ölçülmemiş** demektir |
-| `cost_est_usd`, `cost_src` | host'un kendi tahmini (fatura değil); kit hesabından ayrı |
+| `in` | input tokens, **excluding cache** |
+| `out`, `cache_read`, `cache_write` | output, read from cache, written to cache |
+| `model`, `provider` | model ID; provider only if visible from the source (`msg_bdrk_`→bedrock, `msg_vrtx_`→vertex, `msg_`→anthropic), otherwise empty |
+| `role`, `tier`, `host`, `ts` | role, tier, host, UTC time |
+| `session` | session ID |
+| `id` | stable **run ID** (sub-agent: `agent_id`; orchestrator: `session-<session>`; `run-role`: `rr-…`) |
+| `origin` | `sdk` (recorded by a hook / run-role) or `observed` (read from the transcript by `usage.sh scan`) |
+| `kind` | `snapshot` (may grow) or `final` (finished) |
+| `status` | `interrupted` (a run cut short) |
+| `tq` | `unavailable`: tokens could not be read; zeros mean **unmeasured** |
+| `cost_est_usd`, `cost_src` | the host's own estimate (not an invoice); separate from the kit's computation |
 
-**Tekilleştirme.** Anahtar `(id, model)`. Yazarken: snapshot `final`'i ezmez, küçük okuma büyüğü ezmez (sayaçlar yalnızca artar), gerçek sayılar `unavailable` işaretini ezer. Rapor aynı kuralı okurken de uygular (kanıt sırası: final > ölçülmüş > büyük toplam > geç), böylece sıra dışı/çift satırlar da tek sayılır. Kimliksiz eski satırlar eşleştirilemez: her biri sayılır ve uyarı verilir.
+**Deduplication.** The key is `(id, model)`. On write: a snapshot does not overwrite a `final`, a smaller reading does not overwrite a larger one (counters only grow), and real numbers overwrite the `unavailable` marker. The report applies the same rule on read (order of evidence: final > measured > larger total > later), so out-of-order/duplicate rows are still counted once. Old rows without an ID cannot be matched: each is counted and a warning is given.
 
-**Çok model.** Bir transkript birden çok model kullanırsa model başına bir satır yazılır (aynı `id`); her biri kendi fiyatından hesaplanır, koşu sayısı tekil `id`'dir.
+**Multiple models.** If a transcript uses more than one model, one row per model is written (same `id`); each is priced at its own rate, and the run count is the number of distinct `id`s.
 
-**SDK ve gözlenen.** Hook'lar `origin: sdk` yazar. `usage.sh scan` hook'un hiç görmediği (kapalı hook, kesilen, harici) Claude Code oturumlarını transkriptten okur ve aynı `id`'lerle `observed` yazar; hook zaten yazdıysa **çift sayılmaz**. Varsayılan: en son oturum; `--session`, `--since`, `--dir`.
+**SDK and observed.** Hooks write `origin: sdk`. `usage.sh scan` reads, from the transcript, the Claude Code sessions the hook never saw (hook disabled, interrupted, external) and writes them as `observed` with the same `id`s; if the hook already wrote them, they are **not counted twice**. Default: the latest session; `--session`, `--since`, `--dir`.
 
-## 3. Fiyatlandırma
+## 3. Pricing
 
-`<project-dir>/pricing.json` (veya `TELEMETRY_PRICES`). **Kit fiyat içermez**; değerleri kendi sözleşmenizden doldurun. USD / milyon token.
+`<project-dir>/pricing.json` (or `TELEMETRY_PRICES`). **The kit contains no prices**; fill in the values from your own contract. USD / million tokens.
 
 ```json
 { "version": 2, "currency": "USD",
   "models": [
-    { "model": "<model-kimliği>", "provider": "bedrock", "effective_from": "2026-01-01", "effective_to": null,
-      "in": 0.0, "out": 0.0, "cache_read": 0.0, "cache_write": 0.0, "source": "<fiyat sayfası/sözleşme>" } ] }
+    { "model": "<model-id>", "provider": "bedrock", "effective_from": "2026-01-01", "effective_to": null,
+      "in": 0.0, "out": 0.0, "cache_read": 0.0, "cache_write": 0.0, "source": "<price page/contract>" } ] }
 ```
 
-Eski düz biçim (`{"<model>": {"in":…, "out":…}}`) çalışmaya devam eder (sürümsüz, tarihsiz, sağlayıcısız). `telemetry.sh` ve `route.sh` v2 tablosunu `sdkit_prices_flat` ile bugün geçerli düz tabloya çevirerek okur.
+The old flat form (`{"<model>": {"in":…, "out":…}}`) keeps working (no version, no dates, no provider). `telemetry.sh` and `route.sh` read the v2 table by converting it with `sdkit_prices_flat` into a flat table valid today.
 
-**Çözüm yolu (belirleyici, bu sırayla):** (1) tablo: `TELEMETRY_PRICES` → `<project-dir>/pricing.json` → yok; (2) model: tam eşleşme, yoksa `-YYYYMMDD` soneki atılmış taban kimlik; (3) sağlayıcı: kaydın sağlayıcısı biliniyorsa girdi aynı sağlayıcıda veya sağlayıcısız olmalı; bilinmiyorsa ve ≥2 farklı sağlayıcı aday ise `ambiguous_provider`; (4) etkin tarih: kaydın günü `[effective_from, effective_to]` içinde; (5) birden çok aday: önce sağlayıcıya özgü olan, sonra en son `effective_from`.
+**Resolution path (deterministic, in this order):** (1) table: `TELEMETRY_PRICES` → `<project-dir>/pricing.json` → none; (2) model: exact match, otherwise the base ID with the `-YYYYMMDD` suffix stripped; (3) provider: if the record's provider is known, the entry must be of the same provider or have none; if unknown and there are ≥2 candidates with different providers, `ambiguous_provider`; (4) effective date: the record's day falls within `[effective_from, effective_to]`; (5) multiple candidates: the provider-specific one first, then the latest `effective_from`.
 
-**Çözülemezse maliyet `null`dur, sıfır değil:** `no_pricing_table`, `pricing_table_has_no_models`, `unknown_model` (model kimliği yok dahil), `provider_mismatch`, `ambiguous_provider`, `not_effective_on_record_date`, `missing_rate:<tür>` (token'ı olan bir tür için oran yok; token'ı 0 olan tür için oran gerekmez), `tokens_unavailable`. Okunamayan tablo ve USD dışı para birimi uyarı verir.
+**If it cannot be resolved, cost is `null`, not zero:** `no_pricing_table`, `pricing_table_has_no_models`, `unknown_model` (including a missing model ID), `provider_mismatch`, `ambiguous_provider`, `not_effective_on_record_date`, `missing_rate:<kind>` (no rate for a kind that has tokens; a kind with 0 tokens needs no rate), `tokens_unavailable`. An unreadable table and a non-USD currency produce a warning.
 
-## 4. Maliyet ve rapor
+## 4. Cost and report
 
-Maliyet deftere **yazılmaz**; her raporda token × yürürlükteki tablo ile hesaplanır. Fiyat güncellenince tüm geçmiş yeniden hesaplanır. İç hesap tam duyarlıklıdır (jq çift duyarlık), yalnızca gösterimde 4 ondalığa yuvarlanır. Token sayıları ve maliyet ayrı kalır.
+Cost is **not written** to the ledger; every report computes it as tokens × the table in force. When a price is updated, all history is recomputed. Internal arithmetic is full precision (jq double precision); rounding to 4 decimals happens only in display. Token counts and cost stay separate.
 
-Üç ayrı tutar, birbirine karıştırılmaz: **API-eşdeğeri tahmin** (token × `pricing.json`, bu rapor), **host tahmini** (Claude Code `total_cost_usd`, fatura değil) ve **faturalanan** (`billed`, daima "unavailable": hiçbir kaynak bildirmez; Claude Code aboneliğinde token başına fatura yoktur, tahmin yalnızca aynı token'ların API fiyatıyla maliyetidir).
+Three separate amounts, never mixed: the **API-equivalent estimate** (tokens × `pricing.json`, this report), the **host estimate** (Claude Code `total_cost_usd`, not an invoice) and **billed** (`billed`, always "unavailable": no source reports it; a Claude Code subscription has no per-token invoice, and the estimate is only the cost of the same tokens at API prices).
 
 ```bash
 usage.sh report [slug] [--project] [--session ID|current] [--json]
 usage.sh prices [--json]
 usage.sh scan [--session ID | --since YYYY-MM-DD] [--dir DIR] [--slug S]
-usage.sh extract <transkript>
+usage.sh extract <transcript>
 ```
 
-Rapor: rol, model, oturum tabloları; önbellek isabeti (`cache_read / (in + cache_read + cache_write)`, 1 ondalık) ve API-eşdeğeri tasarruf; tahmini maliyet; kapsama satırı. **Toplam `PARTIAL`** olur (alt sınır) şu durumlarda: fiyatsız koşu, ölçülmemiş koşu (`tq: unavailable`), fiyat tablosu yok/okunamıyor, orkestratör kaydı olmayan oturum (`scan` önerilir), kaydedilen spawn sayısından az ajan kaydı (`state.json .spawns`), kimliksiz eski satır. `--project` arşivlenmiş görevleri (`work/_archive/*.usage.jsonl`, `telemetry.sh archive` yazar) ekler; varsayılan kapsam eskisi gibi açık görevlerdir.
+Report: role, model and session tables; cache hit rate (`cache_read / (in + cache_read + cache_write)`, 1 decimal) and API-equivalent savings; estimated cost; a coverage line. The **total becomes `PARTIAL`** (a lower bound) when: a run is unpriced, a run is unmeasured (`tq: unavailable`), the price table is missing/unreadable, a session has no orchestrator record (`scan` is suggested), there are fewer agent records than the recorded spawn count (`state.json .spawns`), or an old row has no ID. `--project` adds archived tasks (`work/_archive/*.usage.jsonl`, written by `telemetry.sh archive`); the default scope is open tasks as before.
 
-## 5. Önce / sonra
+## 5. Before / after
 
-Gerçek bir Claude Code alt agent transkripti (`Explore`, claude-sonnet-5-5) üzerinde:
+On a real Claude Code sub-agent transcript (`Explore`, claude-sonnet-5-5):
 
 ```
-ÖNCE                                                  SONRA (usage.sh scan + report, örnek fiyatlarla)
+BEFORE                                                AFTER (usage.sh scan + report, with example prices)
 role     tier runs in  out   cache_read cache_write   role          runs in  out    cache_read cache_write est_usd
 Explore  -    1    60  6544  2549093    139803         Explore       1    60  16165  2549093    139803      $1.5316
 TOTAL    -    1    60  6544  2549093    139803         orchestrator  1    202 65568  13210783   284495      $6.0142
 cache hit rate: 94%                                    TOTAL         2    262 81733  15759876   424298      $7.5459
-(model yok, maliyet yok, kapsam yok)                   model claude-sonnet-5-5 / bedrock; hit rate 97.4%; billed: unavailable
+(no model, no cost, no coverage)                       model claude-sonnet-5-5 / bedrock; hit rate 97.4%; billed: unavailable
 ```
 
-Çıktı token'ı 6544 → 16165 (akış ara değeri değil, son değer); orkestratör satırı artık yazılıyor; model/sağlayıcı kırılımı, maliyet ve kapsam uyarıları var. (Fiyatlar yalnızca gösterim içindir.)
+Output tokens went 6544 → 16165 (the final value, not a streaming intermediate); the orchestrator row is now written; there is a model/provider breakdown, cost and coverage warnings. (The prices are for display only.)
 
-## 6. Kalan sınırlar ve doğruluk garantileri
+## 6. Remaining limits and accuracy guarantees
 
-**Garanti:** token sayıları, transkriptte kaydedilen `usage` değerleridir (mesaj başına bir kez, akış tekrarlarında en büyüğü); aynı `id` iki kez sayılmaz; maliyet yalnızca çözümlenen bir fiyat girdisiyle hesaplanır, aksi halde `null` ve uyarı; toplam eksik veride `PARTIAL`; maliyet saklanmadığı için fiyat değişince tutarlı yeniden hesaplanır; aynı defter + aynı tablo = aynı sonuç.
+**Guarantees:** token counts are the `usage` values recorded in the transcript (once per message, the largest among streaming duplicates); the same `id` is never counted twice; cost is computed only with a resolved price entry, otherwise `null` and a warning; the total is `PARTIAL` on missing data; since cost is not stored, it is recomputed consistently when prices change; same ledger + same table = same result.
 
-**Sınırlar:**
-- Kayıt hiç yazılmamış bir yürütme **kanıtlanamaz**: kapsam yalnızca ipuçlarıyla (spawn sayacı, orkestratörsüz oturum, `unavailable` işareti) uyarılır. "Tam" rapor, kaydedilen veri için tamdır.
-- Codex, OpenCode, Cursor token bildirmez (`unavailable`); Gemini önbellek bildirmez. Bunların maliyeti hesaplanamaz.
-- `scan` ve hook kimliklerinin aynı olduğu varsayımı: alt agent kimliği `agent_id` = `agent-<id>.jsonl` dosya adı. Farklı bir Claude Code sürümünde bu tutmazsa çift sayım olabilir; gerçek hook yüküyle doğrulanmadı (yalnızca dosya adlandırması ve `.meta.json` gerçek transkriptlerde görüldü).
-- `scan` bir oturumun tamamını görev defterine yazar; oturum görev dışı iş de içeriyorsa görev fazla görünür.
-- Sağlayıcı yalnızca transkript mesaj kimliği ön ekinden çıkarılır; sunucu/geçit (proxy) arkasında yanlış veya boş olabilir (boşsa sağlayıcısız fiyat girdisi kullanılır).
-- Fiyatlar kullanıcıdan gelir; yanlış tablo yanlış maliyet üretir. Uzun vadeli/ayrı fiyat (1 saatlik önbellek yazımı, toplu/öncelikli katman, uzun bağlam eşiği) modellenmez: `cache_write` tek orandır.
-- Gerçek faturalanan tutar bilinmez; abonelik kullanımında bu rapor yalnızca API-eşdeğeridir.
-- Kapanışta `work/<slug>` silinir; proje toplamı için önce `telemetry.sh archive` (TELEMETRY=1) çalışmış olmalıdır.
-- Hata sınırı: eşzamanlı yazmalar `sdkit_lock` ile korunur; kilidin kırılma süreleri aynıdır (3 sn / 10 sn).
+**Limits:**
+- A run for which no record was ever written **cannot be proven**: coverage is warned about only through hints (spawn counter, a session without an orchestrator, the `unavailable` marker). A "complete" report is complete for the recorded data.
+- Codex, OpenCode and Cursor do not report tokens (`unavailable`); Gemini does not report cache. Their cost cannot be computed.
+- The assumption that `scan` and hook IDs are the same: sub-agent ID `agent_id` = the `agent-<id>.jsonl` file name. If this does not hold in a different Claude Code version, double counting is possible; it was not verified with a real hook payload (only the file naming and `.meta.json` were seen in real transcripts).
+- `scan` writes a whole session into the task ledger; if the session also contains off-task work, the task looks larger.
+- The provider is inferred only from the transcript message-ID prefix; behind a server/gateway (proxy) it may be wrong or empty (if empty, a provider-less price entry is used).
+- Prices come from the user; a wrong table produces a wrong cost. Long-term/separate pricing (1-hour cache write, batch/priority tier, long-context threshold) is not modelled: `cache_write` is a single rate.
+- The actual billed amount is unknown; for subscription usage this report is only API-equivalent.
+- `work/<slug>` is deleted on close; for the project total, `telemetry.sh archive` (TELEMETRY=1) must have run first.
+- Error bound: concurrent writes are protected by `sdkit_lock`; the lock break timeouts are the same (3 s / 10 s).

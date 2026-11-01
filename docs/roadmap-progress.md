@@ -26,8 +26,8 @@ Source: `Implementation Roadmap.md` (§0 rules apply: no commits, no version bum
 - Also clean: `bash -n` on every script/hook/test, `jq` on changed JSON, `build-adapters.sh --check`, `audit.sh policy`.
 - Not done, by rule: commits, version bumps, tags, paid/live benchmarks, live Claude hook payloads, live LiteLLM endpoint, FusionCLI adapter.
 
-## Stabilizasyon (2026-11-01)
-- P0: `init.sh`/`doctor.sh` artık tüm çalışma zamanı script'lerini ve `adapters.d/` kopyasını kurar/denetler (`tests/install.test.sh`: codex, tüm host'lar, claude copy; eksik `dod-check.sh` doğrulayıcıyı reddeder). `.gitignore` makineye özgü dosyaları dışlar.
-- P1: sert rezervasyon > 0 ve sıkı sayılar; tek fiyat çözücü; rezervasyon ömrü (çıkış/sinyal/TTL/recover); proje kilidi; çocuk-oturum işareti (`tests/reservation.test.sh`).
-- P2: yer tutucu/final uzlaştırma (usage.sh), `dod-check.sh accept`, test-map kapıları (`@always`), önbellek anahtarı, silinen test betikleri, dokümanlar.
-- Canlı doğrulanmadı: Claude Code hook yükleri, gerçek `claude -p` çocuk oturumu, sağlayıcı model kimliği fiyatları.
+## Stabilization (2026-11-01)
+- P0: `init.sh`/`doctor.sh` now install/check all runtime scripts and the `adapters.d/` copy (`tests/install.test.sh`: codex, all hosts, claude copy; a missing `dod-check.sh` makes the verifier refuse). `.gitignore` excludes machine-specific files.
+- P1: hard reservation > 0 and strict numbers; one price resolver; reservation lifetime (exit/signal/TTL/recover); project lock; child-session marker (`tests/reservation.test.sh`).
+- P2: placeholder/final reconcile (usage.sh), `dod-check.sh accept`, test-map gates (`@always`), cache key, deleted test scripts, docs.
+- Not verified live: Claude Code hook payloads, a real `claude -p` child session, provider model-id prices.
