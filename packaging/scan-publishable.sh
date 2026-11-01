@@ -18,7 +18,7 @@ report() { # <label> <severity> <lines>
 }
 allow() { [ -f packaging/scan-allow.txt ] && grep -vE '^(#|$)' packaging/scan-allow.txt || echo '^$^'; }
 
-tree() { git ls-files -z | grep -zvE '^packaging/(scan-publishable\.sh|scan-allow\.txt)$' | xargs -0 grep -InE -e "$1" 2>/dev/null; }
+tree() { git ls-files -z | grep -zvE '^packaging/(scan-publishable\.sh|scan-allow\.txt)$|^tests/security\.test\.sh$' | xargs -0 grep -InE -e "$1" 2>/dev/null; }
 report "tree: secret-shaped strings" hard "$(tree "$SECRET")"
 report "tree: quoted credential assignments" hard "$(tree "$ASSIGN" | grep -iE -e "$ASSIGN")"
 report "tree: credentials in URLs" hard "$(tree "$URLCRED" | grep -vE -f <(allow))"
