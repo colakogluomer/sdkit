@@ -306,3 +306,13 @@ Kabul edilen sınırlar:
 `tests/route.test.sh` (model çağrısı yok; yalnızca sahte CLI): yapılandırma ve kayıt, risk/rol/yetenek yönlendirme, geçersiz kılma ve tercihler, sabit politika, yedek ana makine, zorunlu/isteğe bağlı rol, kanıt yeniden kullanımı ve bayatlığı,
 kopya ve eşzamanlı istek, hata sınıfları ile yeniden deneme/yükseltme sınırları, sert/danışma bütçe ayrımı, ölçülmeyen kullanım, maliyet tahmini, bütçe kurtarma, `run-role.sh` bütünleşmesi,
 telemetri, Claude Code hook'u, yönlendirme kapalıyken eski davranış, benchmark dosyalarının değişmemesi.
+
+## F14 — Sert maliyet politikası (varsayılan kapalı)
+`ROUTE_COST_ENFORCE=hard` parasal sınırları **harcama sınırında durdurucu** yapar (varsayılan `off`: eski gibi yalnız danışma). Sınırlar: `ROUTE_BUDGET_COST` (görev), `ROUTE_ROLE_BUDGET_COST` (rol), `ROUTE_PROJECT_BUDGET_COST` (tüm açık/arşivli görevler). `ROUTE_RESERVE_USD` her başlayan koşu için rezervasyon tutar (`work/<slug>/reservations.jsonl`); `route.sh outcome` rezervasyonu serbest bırakır ve gerçek harcama kullanım defterinde kalır (mutabakat). Tutar yalnız kullanıcının `pricing.json`'undan **tahmindir**, fatura değildir. **Bilinmeyen asla geçmez**: kapsamda ölçülmemiş/fiyatsız koşu varsa veya seçilen modelin fiyatı yoksa karar `BUDGET_EXHAUSTED` (exit 3) olur; zorunlu roller atlanmaz, PASS yazılmaz; `--ignore-budget` (kullanıcı onayı) `BUDGET_OVERRIDDEN` uyarısıyla kaydedilir. Ek LLM çağrısı yoktur. `tests/costroute.test.sh`.
+
+### F14 — Kararlılık düzeltmeleri (sert politika)
+- **Sayılar sıkı doğrulanır**: `1.2.3`, `.`, `1e5`, boş/negatif değer yapılandırma hatasıdır (çıkış 2); sert modda `jq`/hesap hatası da kapalı-başarısız (`CONFIG_INVALID`, `--ignore-budget` ile aşılamaz).
+- **Rezervasyon > 0 olmak zorunda**: `ROUTE_RESERVE_USD` verilmezse `ROUTE_ROLE_TOKENS`/`TOKEN_BUDGET_TASK` × modelin en pahalı oranı ile türetilir (dayanak kararda `reservation_basis`); türetilemezse durur.
+- **Tek fiyat çözücü**: `route.sh` ve `usage.sh` aynı `SDKIT_PRICE_JQ` (env.sh) ile fiyatlar: tam model kimliği, yoksa `-YYYYMMDD` ekisiz kimlik; sağlayıcı; geçerlilik penceresi.
+- **Proje kilidi**: sert modda karar `work/.project-budget.lock` altında verilir (önce proje, sonra görev kilidi); bütçe okuma + rezervasyon tek adımdır. Paralel görevler toplamda proje sınırını aşamaz (`tests/reservation.test.sh`).
+- **Rezervasyon ömrü**: `run-role.sh` her çıkışta (başarı, hata, ret, SIGINT/SIGTERM) kararı kapatır; serbest bırakma idempotenttir. `ROUTE_RESERVE_TTL_S` (3600) aşıldığında **ve** sahibi süreç yoksa bayat sayılır (`route.sh reservations [list|expire]`, `recover.sh apply`); yaşayan süreç rezervasyonunu korur.

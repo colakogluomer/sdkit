@@ -1,7 +1,4 @@
 # spec-driven-kit rehberi
-### `scripts/report.sh` (Value Report)
-Görev ve oturum değer raporu: roller/modeller, token kategorileri, API-eşdeğeri maliyet, **gözlenen** optimizasyonlar ve tasarruf (kanıt hiyerarşisi, taban kaynağı, kapsam, güven, ölçülen/tahmin ayrımı; yetersiz kanıtta "N/A — insufficient baseline data"). Yeni defter yok: `usage.sh`, `telemetry.sh`, yönlendirme/bağlam/test-seçim kayıtlarını okur; LLM çağrısı yok. `sdkit report task|session|latest|history [--detailed|--json|--markdown]`, `regenerate`. Tam tasarım, formüller ve sınırlar: [design-report.md](design-report.md).
-
 
 Bu rehber kit'in içindeki her parçayı (skill, agent, hook, script, yapılandırma) ve birbirleriyle nasıl çalıştıklarını
 anlatır. Hızlı kurulum için `README.md`, PR host'ları için `hosts.md` var.
@@ -48,10 +45,10 @@ Dört şeyi garanti etmeye çalışır:
 |---|---|---|
 | **Skill** | 4 | Görevi yürüten talimat setleri: `spec-driven-dev` (ana akış, `references/` ile kademeli yüklenir), `incident-to-rule`, `scaffold-init`, `scaffold-doctor` |
 | **Rol** | 10 | `core/roles/` altında araçtan bağımsız tanımlar: `orchestrator`, `analyst`, `scout`, `engineer`, `developer`, `test-writer`, `devsecops`, `reviewer`, `security-auditor`, `verifier`. Dokuzu subagent olarak üretilir; `verifier`'ın `deep: strong` ile strong katmanlı ikizi `verifier-deep` de üretilir, yani host başına **10 rol dosyası** |
-| **Hook** | 18 + 1 | Claude Code'da araç adımları sırasında otomatik çalışan 18 kontrol (`guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract` dahil) ve diğer host'ların aynı hook'ları çağırdığı `adapt.sh` kabuğu. Hook olmayan yerde git hook'ları aynı kuralların çoğunu uygular |
+| **Hook** | 18 + 1 | Claude Code'da araç adımları ve oturum sınırlarında otomatik çalışan 18 kontrol (`guard-readonly`, `usage-log`, `guard-budget`, `result-size`, `check-contract`, `value-report` dahil) ve diğer host'ların aynı hook'ları çağırdığı `adapt.sh` kabuğu. Hook olmayan yerde git hook'ları aynı kuralların çoğunu uygular |
 | **Doğrulama motoru** | 1 çekirdek + stack başına adımlar | `scripts/verify-core.sh` (diff tabanı, değişen dosyalar, `verify.d`, yeşil-sonuç önbelleği) + `stacks/<stack>/scripts/steps.sh` (stack'in kendi kontrolleri) |
 | **Stack** | 7 | `go`, `spring-boot` ve `jvm` (Maven/Gradle), `python`, `nextjs`, `react-native` (son ikisi `stacks/_node/` yardımcısını paylaşır) ve algılama başarısızsa `generic`. Sözleşme: `stacks/README.md` |
-| **Script** | 20 | `sdd.sh`, `resolve-base.sh`, `open-pr.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `check-plan-parity.sh`, `check-writes.sh`, `usage.sh`, `telemetry.sh`, `contract.sh`, `workflow.sh`, `route.sh`, `memory.sh`, `lookup-cache.sh`, `run-role.sh` + `verify-core.sh` ve `verify-lib.sh` (motor; doğrudan çalıştırılmaz) |
+| **Script** | 31 | `sdd.sh`, `resolve-base.sh`, `open-pr.sh`, `guard.sh`, `plan-waves.sh`, `worktree.sh`, `state.sh`, `parse-verdict.sh`, `check-plan-parity.sh`, `dod-check.sh`, `digest.sh`, `test-select.sh`, `adapter.sh`, `dispatch.sh`, `knowledge.sh`, `recover.sh`, `redact.sh`, `audit.sh`, `pr-check.sh`, `check-writes.sh`, `usage.sh`, `telemetry.sh`, `contract.sh`, `workflow.sh`, `route.sh`, `memory.sh`, `lookup-cache.sh`, `run-role.sh` + `verify-core.sh` ve `verify-lib.sh` (motor; doğrudan çalıştırılmaz) |
 | **Kurallar** | 4+ | `core/rules/`: `general`, `git`, `test-first`, `token-economy` (+ stack kuralları) |
 | **Şablonlar** | | Yeni repoda doldurulacak proje tarafı dosyaları (`templates/`, `stacks/go/`, `core/rules/`) |
 | **Host** | 5 | `claude`, `codex`, `opencode`, `cursor`, `gemini`; rol/guard biçimi `bin/emit/<host>.sh` + `core/hosts.env` (bölüm 16) |
@@ -522,7 +519,34 @@ Görev `writes:` kümesinin dışında dosya değiştirdiyse 1 ile çıkar ve do
 `<project-dir>/work/<slug>/state.json` görev durumu (devam etme için). `task <id> todo|doing|done|blocked`; `retry <id>` ilk seferde 0 çıkıp sayar, hak kullanılmışsa 1 çıkar (tek otomatik deneme kuralı). `jq` gerekir.
 
 ### `scripts/parse-verdict.sh <dosya|-> [--proposal proposal.md]`
-Verifier çıktısını doğrular: `DOD / FINDINGS / VERIFY / VERDICT` sırası, her DoD satırı `PASS|FAIL`, her bulgu `CONFIRMED|PLAUSIBLE`, `VERDICT` kurala uyuyor mu (herhangi bir `FAIL` veya `CONFIRMED` ise `BLOCK`). `--proposal` ile verifier'ın, öneri dosyasındaki DoD kadar maddeyi yargıladığı da denetlenir. Çıkış: 0 PASS, 1 BLOCK, 2 bozuk/tutarsız.
+Verifier çıktısını doğrular: `DOD / FINDINGS / VERIFY / VERDICT` sırası, her DoD satırı `PASS|FAIL`, her bulgu `CONFIRMED|PLAUSIBLE`, `VERDICT` kurala uyuyor mu (herhangi bir `FAIL` veya `CONFIRMED` ise `BLOCK`). `--proposal` ile verifier'ın, öneri dosyasındaki DoD kadar maddeyi yargıladığı da denetlenir. Çıkış: 0 PASS, 1 BLOCK, 2 bozuk/tutarsız. F08: önce yalnızca biçimi etkileyen kurallarla normalleştirilir (CRLF, `**` vurgu, `*`/`1.` madde işareti, küçük harfli `pass/fail/confirmed/plausible`, `**VERDICT:** **PASS**`); hiçbir şey çıkarsanmaz, eksik belirteç eksik kalır. Hata iletisi türünü söyler: `MALFORMED[format]` (şekil; bir kez yeniden sorulur) veya `MALFORMED[semantic]` (içerik kendiyle çelişiyor ya da kanıtsız: FAIL'li PASS, `PASS | manual`, `PASS | post-deploy`, `PASS | n/a`, boş kanıt, atlanan DoD maddesi; yargı asla düzeltilmez). `manual`/`post-deploy` bir PASS kanıtı değildir.
+
+### `scripts/dod-check.sh <proposal.md>`
+F08 erken DoD denetimi; pahalı bir rol çalışmadan önce, `D<n>: ... | Verified by: <yöntem>` satırlarını sınıflar: `automated`, `static`, `manual`, `post-deploy`, `none: <neden>`. Yöntemsiz madde, nedensiz `none`, yinelenen id, bilinmeyen yöntem → çıkış 1 (her sorun yazdırılır). `run-role.sh` açık bir öneri varken verifier'ı başlatmadan önce bunu çağırır (maliyet yok, `exit 2`). Çıkış: 0 ok, 1 sorun, 2 kullanım.
+
+### `scripts/digest.sh output|envelope|stats`
+F09 sınırlı görünümler. `output`: uzun komut çıktısı (varsayılan >60 satır) için ilk 10 satır + her hata satırı (FAIL/ERROR/panic/CONFIRMED…) + son 15 satır + tam metnin yolu. `envelope --role R --ref F`: bir rolün uzun cevabı için `ENVELOPE/1` (karar, DoD sayıları, FAIL/CONFIRMED/BLOCKER satırları aynen, kanıt yolu); kısa cevap (<1500 bayt) olduğu gibi basılır. Zarf bir **görünümdür, karar değil**: karar tam cevap üzerinde `parse-verdict.sh`'tir. `run-role.sh --envelope` / `RESULT_ENVELOPE=1` (varsayılan kapalı). Boyutlar `work/<slug>/context.jsonl`'a yazılır; `stats` özetler.
+
+### `scripts/test-select.sh list|run`
+F10 değişen dosya → odaklı test eşlemesi (`<project-dir>/test-map.conf` veya `tests/test-map.conf`: `ERE => komut ;; komut | ALL | NONE`, zorunlu `@all =>`, isteğe bağlı `@always =>`). Haritada olmayan yol veya paylaşılan modül tüm takımı seçer (tahmin yok). `run`: `pipefail` ile çalıştırır, komut başına süre, özet satırı; yalnız yeşil sonuç tam ağaç kimliğiyle önbelleğe alınır. T0–T3 politikası: Implementation Roadmap §3.
+
+### `bench/costbase.sh capture|compare`
+F11 model çağırmayan sabit-veri taban çizgisi (`bench/baselines/*.costbase.json`): biçim-yalnız verdict yeniden denemeleri (normalleştirme kapalı/açık), anlamsal hataların asla kabul edilmemesi, bağlam baytları, küçük yamada seçilen test sayısı. **Görev başına maliyet ÖLÇÜLMEDİ** (canlı koşu gerekir). `compare` farklı fikstür/harita varsa reddeder.
+
+### `scripts/report.sh` (Value Report)
+Görev ve oturum değer raporu: roller/modeller, token kategorileri, API-eşdeğeri maliyet, **gözlenen** optimizasyonlar ve tasarruf (kanıt hiyerarşisi, taban kaynağı, kapsam, güven, ölçülen/tahmin ayrımı; yetersiz kanıtta "N/A — insufficient baseline data"). Yeni defter yok: `usage.sh`, `telemetry.sh`, yönlendirme/bağlam/test-seçim kayıtlarını okur; LLM çağrısı yok. `sdkit report task|session|latest|history [--detailed|--json|--markdown]`, `regenerate`. Tam tasarım, formüller ve sınırlar: [design-report.md](design-report.md).
+
+### Faz F12–F20 script'leri (kısa)
+- `adapter.sh capabilities|usage|cancel|status|validate <host|ext:ad>`: yürütme adaptörü sözleşmesi, desteklenmeyen yetenek dürüstçe "unsupported" (çıkış 3). Ayrıntı: [design-adapters.md](design-adapters.md). `adapters.d/litellm.sh`: isteğe bağlı, metin-yalnız, varsayılan kapalı.
+- `route.sh` + `ROUTE_COST_ENFORCE=hard`: sert maliyet politikası, rezervasyon, bilinmeyen = geçmez ([design-routing.md](design-routing.md) F14).
+- `dispatch.sh claim|done|release|status`: isteğe bağlı (`PARALLEL=on`) idempotent paralel dağıtım; bağımlılık, yazma çakışması, `MAX_PARALLEL`.
+- `knowledge.sh put|get|list|clear`: dosya içerik hash'ine bağlı görev notları; bağımsız roller reddedilir.
+- `telemetry.sh trace`: görev → faz → rol → yürütme → istek izi, içerik yok ([design-telemetry.md](design-telemetry.md) F17).
+- `recover.sh scan|apply`: yarım kalan kayıt işlerini güvenle ve idempotent kapatır; yeniden çalıştırmaz, BLOCK'a dokunmaz.
+- `redact.sh`, `audit.sh log|show|verify|policy`: gizli bilgi filtresi, hash zincirli denetim izi, statik zorlama denetimi ([design-security.md](design-security.md)).
+- `dod-check.sh accept|accepted|acceptances`: manual/post-deploy/none DoD maddesini yalnız bir kişi (`--by`, `--reason` zorunlu) kabul edebilir; madde metnine bağlıdır, metin değişirse geçersiz olur. `parse-verdict.sh` `accepted: <kim>` kanıtını yalnız kayıt varsa sayar; kanıt-belirteci ayrıştırması sezgisel süzgeçtir, kanıt değildir.
+- `route.sh reservations`, `SDKIT_CHILD_RUN`: bayat rezervasyon süresi ve `run-role.sh` çocuk oturumu işareti (Stop hook'u aynı token'ı ikinci kez yazmaz; canlı doğrulanmadı).
+- `pr-check.sh [--milestone]` + `bench/history.sh`: ucuz PR denetimi (T0+T1), kilometre taşında T3 ve fikstür regresyon geçmişi; `templates/ci/pr-check.yml` örnektir, kurulmaz.
 
 ### `scripts/check-plan-parity.sh <plan.md> <proposal.md> [tasks.md] [--loose]`
 Plan ↔ öneri ↔ görevler eşitliğini deterministik denetler. DoD satırı `D<n>: <metin> | Verified by: <tür>`; varsayılan olarak id, metin ve Verified-by eşleşmeli (`--loose`: yalnız id ve Verified-by). `tasks.md` verilirse plandaki "Execution plan" görevleri `role/writes/after` açısından karşılaştırılır. Çıkış: 0 eşit, 1 fark (yazdırılır), 2 kullanım/DoD bulunamadı.
@@ -755,7 +779,7 @@ spec-driven-kit/
 │   ├── go/                detect.sh, permissions.txt, golangci.yml, rules/, verify.d.example/,
 │   │   └── scripts/       verify.sh (sarmal), steps.sh, fmt.sh, tools.sh
 │   └── spring-boot/ jvm/ python/ nextjs/ react-native/ generic/    aynı yapı
-├── tests/                 run.sh (script duman testleri), sdd.test.sh, shared.test.sh, memory.test.sh, hardening.test.sh, telemetry.test.sh, budget.test.sh, route.test.sh
+├── tests/                 run.sh (script duman testleri), sdd.test.sh, shared.test.sh, memory.test.sh, hardening.test.sh, telemetry.test.sh, usage.test.sh, budget.test.sh, route.test.sh
 ├── templates/             sdkit.env, project.md, known-pitfalls.md, CLAUDE.md, AGENTS.md, adr/, settings.*.json, claude.gitignore
 ├── bin/                   init.sh, doctor.sh, sync.sh, upgrade.sh, build-adapters.sh, lib.sh, emit/<host>.sh
 └── docs/                  guide.md (bu dosya), cheatsheet.md, hosts.md, README.md

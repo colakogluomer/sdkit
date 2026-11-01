@@ -140,3 +140,45 @@ sdkit_lock() {
   return 0
 }
 sdkit_unlock() { rm -rf "$1.lock" 2>/dev/null; return 0; }
+
+# sdkit_prices_flat <file>: the price table as the flat map older readers expect ({model: {in,out,cache_read,cache_write}}, USD per million
+# tokens). A version-1 table (already flat) passes through unchanged; a version-2 table ({"version":2,"models":[...]}) is collapsed to the entries
+# in force today, the latest effective_from winning. Prints {} for a missing or unreadable file. usage.sh reads the full v2 table itself.
+sdkit_prices_flat() {
+  [ -f "${1:-}" ] || { echo '{}'; return 0; }
+  jq -c --arg d "$(date -u +%Y-%m-%d)" '
+    if type == "object" and ((.models // null) | type) == "array" then
+      [.models[] | select(type == "object" and (.model // "") != "" and ((.effective_from // "0000-00-00") <= $d) and ((.effective_to // "9999-12-31") >= $d))]
+      | sort_by(.effective_from // "") | map({key: .model, value: (with_entries(select(.key | IN("in","out","cache_read","cache_write"))))}) | from_entries
+    elif type == "object" then . else {} end' "$1" 2>/dev/null || echo '{}'
+}
+
+# The ONE price resolver: usage.sh reports with it and route.sh decides budgets with it, so a model id never prices differently in the two.
+# jq definitions; the program must bind `$pt` = the raw price table (v2 {"version":2,"models":[...]} or flat v1 {model:{...}}, or null).
+# pick($r) resolves a ledger row ({model, provider?, ts?}) to {entry} or {err}; rate($r) is the entry or null; miss($r; $e) lists the counters
+# the row used that the entry has no rate for; cost_of($r) is USD for a normalised row (in/out/cache_read/cache_write numbers), or null when unpriced.
+SDKIT_PRICE_JQ='
+def entries: if $pt == null then []
+  elif ($pt | type) == "object" and (($pt.models // null) | type) == "array" then [$pt.models[] | select(type == "object" and ((.model // null) | type) == "string" and .model != "")]
+  elif ($pt | type) == "object" then [$pt | to_entries[] | select(.value | type == "object") | {model: .key} + .value]
+  else [] end;
+def num($v): if ($v | type) == "number" and $v >= 0 then $v else null end;
+# one rule, in this order: exact model id (else the id without a -YYYYMMDD suffix); provider (an entry without one fits any); effective window
+# on the record date; the most specific provider, then the latest effective_from. Anything unresolved is an error, never a guess.
+def pick($r):
+  (($r.ts // "")[0:10]) as $day | ($r.model | sub("-[0-9]{8}$"; "")) as $base | entries as $all
+  | ([$all[] | select(.model == $r.model)] | if length > 0 then . else [$all[] | select(.model == $base)] end) as $c1
+  | if $r.model == "" or ($c1 | length) == 0 then {err: "unknown_model"}
+    else ([$c1[] | select($r.provider == "" or (.provider // "") == "" or .provider == $r.provider)]) as $c2
+    | if ($c2 | length) == 0 then {err: "provider_mismatch"}
+      else ([$c2[] | select($day == "" or (((.effective_from // "0000-00-00") <= $day) and ((.effective_to // "9999-12-31") >= $day)))]) as $c3
+      | if ($c3 | length) == 0 then {err: "not_effective_on_record_date"}
+        elif $r.provider == "" and ($c3 | map(.provider // "") | unique | map(select(. != "")) | length) > 1 then {err: "ambiguous_provider"}
+        else {entry: ($c3 | sort_by([(if $r.provider != "" and (.provider // "") == $r.provider then 1 else 0 end), (.effective_from // "")]) | last)} end end end;
+def rate($r): pick($r) as $p | if $p.err then null else $p.entry end;
+def miss($r; $e): ["in", "out", "cache_read", "cache_write"] | map(select(($r[.] // 0) > 0 and num($e[.]) == null));
+def cost_of($r): rate($r) as $e | if $e == null or (miss($r; $e) | length) > 0 then null
+  else (($r.in // 0) * (num($e.in) // 0) + ($r.out // 0) * (num($e.out) // 0) + ($r.cache_read // 0) * (num($e.cache_read) // 0) + ($r.cache_write // 0) * (num($e.cache_write) // 0)) / 1000000 end;
+'
+# sdkit_price_table <file>: the raw price table as one JSON value (null when missing or unreadable), for `--argjson pt`.
+sdkit_price_table() { [ -f "${1:-}" ] && jq -c . "$1" 2>/dev/null || echo null; }

@@ -35,7 +35,51 @@ find_file() {  # find_file <core-relative name> <project-dir name>: the kit's co
 tierenv() { local f; f="$(find_file tiers.env tiers.env)" && sed -n "s/^$1=//p" "$f" | tail -1; }
 ADAPTERS="$(find_file adapters.json adapters.json 2>/dev/null || true)"
 now_s() { date +%s; }
-prices_json() { local f="${TELEMETRY_PRICES:-$top/$KIT_DIR/pricing.json}"; { [ -f "$f" ] && jq -c 'if type == "object" then . else {} end' "$f" 2>/dev/null; } || echo '{}'; }   # the user's price table (usd per million tokens); the kit ships none
+prices_json() { sdkit_prices_flat "${TELEMETRY_PRICES:-$top/$KIT_DIR/pricing.json}"; }   # the user's price table (usd per million tokens), flattened to what is in force today; the kit ships none
+# Money is priced by the SAME resolver as usage.sh (env.sh SDKIT_PRICE_JQ: exact id, else the id without a -YYYYMMDD suffix; provider; effective window on the record date), never by a private lookup.
+PT="$(sdkit_price_table "${TELEMETRY_PRICES:-$top/$KIT_DIR/pricing.json}")"
+PJQ="$SDKIT_PRICE_JQ"'def nrm: . + {model: (.model // ""), provider: (.provider // ""), in: (.in // 0), out: (.out // 0), cache_read: (.cache_read // 0), cache_write: (.cache_write // 0)};'
+# strict numbers: 1.2.3, "." and "1e5" are not numbers; a monetary value is never guessed
+isnum() { [[ "${1:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; }
+ispos() { isnum "${1:-}" && awk -v v="$1" 'BEGIN{exit !(v > 0)}'; }
+
+cost_scope() {  # cost_scope <usage ledger files...> (env CS_ROLE = only that role): {runs, unmeasured_or_unpriced, usd} from the user's price table, lower bound when any run is unpriced. Fails (non-zero, no output) when it cannot compute.
+  local f all='[]'; for f in "$@"; do [ -f "$f" ] && { all="$(jq -sc --argjson a "$all" '$a + .' "$f")" || return 1; }; done
+  jq -c --argjson pt "$PT" --arg r "${CS_ROLE:-}" "$PJQ"'
+    map(select(type == "object") | nrm | select($r == "" or ((.role // "" | sub("-deep$"; "")) == $r))) as $m
+    | ($m | map(select((.tq // "actual") != "unavailable" and cost_of(.) != null))) as $pr
+    | {runs: ($m | length), unmeasured_or_unpriced: (($m | length) - ($pr | length)), usd: ($pr | map(cost_of(.)) | add // 0)}' <<< "$all"
+}
+R_RTTL="${ROUTE_RESERVE_TTL_S:-3600}"
+reservations_open() {  # one line per reservation that has no release yet, over every task: slug <TAB> id <TAB> usd <TAB> age_s <TAB> pid <TAB> active|stale. Non-zero when a ledger cannot be read (callers under hard enforcement stop).
+  local f s chunk out=""
+  for f in "$work"/*/reservations.jsonl; do [ -f "$f" ] || continue; s="$(basename "$(dirname "$f")")"
+    chunk="$(jq -sr --arg s "$s" '(map(select(.type == "release") | .id)) as $done | .[] | select(.type == "reserve" and (.id as $i | $done | index($i) | not))
+      | [$s, .id, (.usd | tostring), ((now - ((.ts // "1970-01-01T00:00:00Z") | fromdateiso8601)) | floor | tostring), ((.pid // "") | tostring)] | @tsv' "$f" 2>/dev/null)" || return 1
+    [ -z "$chunk" ] || out="$out$chunk"$'\n'
+  done
+  local sl id usd age pid st
+  while IFS=$'\t' read -r sl id usd age pid; do [ -n "$id" ] || continue
+    isnum "$usd" || return 1
+    st=active; if [ "$age" -gt "$R_RTTL" ] && ! { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; }; then st=stale; fi   # old AND its process is gone; a live process keeps its reservation however long it runs
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$sl" "$id" "$usd" "$age" "$pid" "$st"
+  done <<< "$out"
+}
+open_reserved() {  # USD currently reserved by runs that have not reported an outcome yet and are not stale, over every task (F14); non-zero when unreadable
+  local l; l="$(reservations_open)" || return 1
+  awk -F'\t' '$6 == "active" {t += $3} END {printf "%.6f\n", t + 0}' <<< "$l"
+}
+release_reservation() {  # release_reservation <slug> <id> <class> [note]: idempotent (a second call, or a late outcome, appends nothing); under the project lock
+  local f="$work/$1/reservations.jsonl" u
+  [ -f "$f" ] || return 0
+  sdkit_lock "$work/.project-budget"
+  if ! jq -e --arg id "$2" 'select(.type == "release" and .id == $id)' "$f" >/dev/null 2>&1; then
+    u="$(jq -r --arg id "$2" 'select(.type == "reserve" and .id == $id) | .usd' "$f" | head -1)"
+    isnum "$u" || u=0
+    printf '%s\n' "$(jq -nc --arg id "$2" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson u "$u" --arg c "$3" --arg n "${4:-actual spend is in usage.jsonl; release returns the reservation}" '{type:"release",id:$id,ts:$ts,reserved_usd:$u,class:$c,note:$n}')" >> "$f"
+  fi
+  sdkit_unlock "$work/.project-budget"
+}
 
 # ---------------------------------------------------------------- settings (all optional; the defaults are conservative)
 ROUTING="${ROUTING:-off}"; R_POLICY="${ROUTE_POLICY:-tiered}"; R_FIXED="${ROUTE_FIXED_MODEL:-}"
@@ -49,7 +93,13 @@ cfg_errors() {  # one line per problem in the settings; nothing when sound
   local v; for v in ROUTE_MAX_RETRIES ROUTE_MAX_ESCALATIONS ROUTE_MAX_ATTEMPTS ROUTE_BACKOFF_S ROUTE_INFLIGHT_TTL_S; do
     eval "isint \"\${$v:-0}\"" || echo "$v must be a non-negative integer"; done
   for v in ROUTE_TIMEOUT_S ROUTE_ROLE_TOKENS; do eval "[ -z \"\${$v:-}\" ] || isint \"\${$v:-}\"" || echo "$v must be a non-negative integer"; done
-  case "${ROUTE_BUDGET_COST:-}" in ''|*[!0-9.]*) [ -z "${ROUTE_BUDGET_COST:-}" ] || echo "ROUTE_BUDGET_COST must be a number (USD)" ;; esac
+  [ -z "${ROUTE_BUDGET_COST:-}" ] || isnum "$ROUTE_BUDGET_COST" || echo "ROUTE_BUDGET_COST must be a number (USD), like 5 or 0.25"
+  case "${ROUTE_COST_ENFORCE:-off}" in off|hard) ;; *) echo "ROUTE_COST_ENFORCE must be off or hard" ;; esac
+  for v in ROUTE_ROLE_BUDGET_COST ROUTE_PROJECT_BUDGET_COST ROUTE_RESERVE_USD; do
+    eval "[ -z \"\${$v:-}\" ] || isnum \"\${$v:-}\"" || echo "$v must be a number (USD), like 5 or 0.25"; done
+  [ -z "${ROUTE_RESERVE_USD:-}" ] || ! isnum "$ROUTE_RESERVE_USD" || [ "${ROUTE_COST_ENFORCE:-off}" != hard ] || ispos "$ROUTE_RESERVE_USD" || echo "ROUTE_RESERVE_USD must be greater than 0 under ROUTE_COST_ENFORCE=hard (a zero reservation reserves nothing)"
+  isint "${ROUTE_RESERVE_TTL_S:-3600}" || echo "ROUTE_RESERVE_TTL_S must be a non-negative integer (seconds)"
+  [ "${ROUTE_COST_ENFORCE:-off}" != hard ] || [ -n "${ROUTE_BUDGET_COST:-}${ROUTE_ROLE_BUDGET_COST:-}${ROUTE_PROJECT_BUDGET_COST:-}" ] || echo "ROUTE_COST_ENFORCE=hard needs ROUTE_BUDGET_COST, ROUTE_ROLE_BUDGET_COST or ROUTE_PROJECT_BUDGET_COST"
   case "$R_DOWN" in 0|1) ;; *) echo "ROUTE_DOWNGRADE_LOW must be 0 or 1" ;; esac
   for v in "$R_ESCTO" "$R_FLOOR_LOW" "$R_FLOOR_MED" "$R_FLOOR_HIGH"; do [ "$(rank "$v")" != 0 ] || echo "'$v' is not a tier (light|standard|strong)"; done
   local h; for h in $R_FALLBACK; do [ -z "$ADAPTERS" ] || jq -e --arg h "$h" 'has($h)' "$ADAPTERS" >/dev/null 2>&1 || echo "ROUTE_FALLBACK_HOSTS: unknown host '$h'"; done
@@ -109,7 +159,7 @@ classify_text() {  # (exit 7/8 of run-role/decide are routing outcomes, not host
   case "$rc" in
     0) case "$prc" in 1) echo VERDICT_BLOCK ;; *) echo OK ;; esac; return ;;
     3) echo BUDGET_EXHAUSTED; return ;; 4) echo CONTRACT_FAILURE; return ;; 5) echo REPORTED_FAILURE; return ;;
-    6) echo INVALID_OUTPUT; return ;; 127) echo HOST_MISSING; return ;; 124) echo TIMEOUT; return ;; 7) echo NOT_RUN; return ;;
+    6) echo INVALID_OUTPUT; return ;; 130|143) echo INTERRUPTED; return ;; 127) echo HOST_MISSING; return ;; 124) echo TIMEOUT; return ;; 7) echo NOT_RUN; return ;;
   esac
   case "$t" in
     *"rate limit"*|*"rate_limit"*|*"429"*|*"too many requests"*|*"quota"*|*"overloaded"*) echo RATE_LIMIT ;;
@@ -178,6 +228,17 @@ case "$cmd" in
     rc=""; prc=""; err=""; while [ $# -gt 0 ]; do case "$1" in --rc) rc="$2"; shift ;; --prc) prc="$2"; shift ;; --stderr) err="$2"; shift ;; --role) shift ;; esac; shift; done
     isint "$rc" || { echo "classify needs --rc N" >&2; exit 2; }
     classify_text "$rc" "$prc" "$err"; exit 0 ;;
+  reservations)  # reservations [list|expire] [--json]: the open reservations of every task; expire releases the stale ones (old AND owner process gone)
+    act=list; js=0; for a in "$@"; do case "$a" in list|expire) act="$a" ;; --json) js=1 ;; *) echo "usage: route.sh reservations [list|expire] [--json]" >&2; exit 2 ;; esac; done
+    l="$(reservations_open)" || { echo "reservations: a reservations.jsonl cannot be read (restore it; nothing is guessed)" >&2; exit 2; }
+    if [ "$act" = expire ]; then
+      n=0; while IFS=$'\t' read -r sl id usd age pid st; do [ "$st" = stale ] || continue
+        release_reservation "$sl" "$id" EXPIRED "expired after ${age}s (older than ROUTE_RESERVE_TTL_S=$R_RTTL and its process ${pid:+$pid }is gone); released by route.sh reservations expire"; n=$((n + 1)); done <<< "$l"
+      echo "reservations: expired $n stale reservation(s)"; exit 0
+    fi
+    if [ "$js" = 1 ]; then jq -Rn '[inputs | split("\t") | select(length >= 6) | {slug: .[0], id: .[1], usd: (.[2] | tonumber), age_s: (.[3] | tonumber), pid: (if .[4] == "" then null else (.[4] | tonumber) end), state: .[5]}]' <<< "$l"
+    else [ -z "$l" ] && echo "no open reservations" || awk -F'\t' '{printf "%s\t%s\t$%s\tage %ss\t%s\n", $1, $2, $3, $4, $6}' <<< "$l"; fi
+    exit 0 ;;
   decide|explain|outcome) ;;
   *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2 ;;
 esac
@@ -199,6 +260,8 @@ if [ "$cmd" = outcome ]; then
     '{v:1, type:"outcome", ts:$ts, id:$id, key:$d.key, role:$d.role, class:$cls, rc:$rc, dur_ms:(if $dur == "" then null else ($dur | tonumber) end), tokens:$tok, tokens_quality:(if $tok == null then "unavailable" else "actual" end)}
      + (if ($cest | test("^[0-9]+([.][0-9]+)?$")) then {host_cost_estimate_usd:($cest | tonumber), cost_provenance:"host client-side estimate (not billed)"} else {} end)')"
   sdkit_lock "$ledger"; printf '%s\n' "$line" >> "$ledger"; sdkit_unlock "$ledger"
+  # reconcile: the reservation goes back to the pool whatever happened (idempotent); the actual spend is whatever the usage ledger now says (estimated, or unknown)
+  release_reservation "$slug" "$did" "$cls"
   tele workflow.decision --source routing --outcome "outcome:$cls" --role "$(jq -r .role <<< "$dec")" --note "$did rc=$rc"
   echo "$cls"; exit 0
 fi
@@ -255,7 +318,9 @@ stop() { D_ACTION=stop; D_REASON="$1"; [ -n "${2:-}" ] && D_NOTES+=("$2"); emit;
 KEY=""
 if [ "$reserve" = 1 ]; then   # one decision at a time per task: the in-flight check and the record below must not interleave with another request
   D_ID="rd-$slug-$(date +%s)-$$-$RANDOM"; mkdir -p "$work/$slug" 2>/dev/null
-  sdkit_lock "$ledger"; trap 'sdkit_unlock "$ledger"' EXIT
+  # lock order is fixed: the PROJECT lock (project-wide money decisions) first, then the task's ledger lock; nothing takes them the other way round
+  if [ "${ROUTE_COST_ENFORCE:-off}" = hard ]; then sdkit_lock "$work/.project-budget"; plocked=1; fi
+  sdkit_lock "$ledger"; trap 'sdkit_unlock "$ledger"; [ "${plocked:-0}" = 1 ] && sdkit_unlock "$work/.project-budget"' EXIT
 fi
 cerr="$(cfg_errors | head -3 | paste -sd';' -)"; [ -z "$cerr" ] || stop CONFIG_INVALID "$cerr"
 REG="$(registry_build 2>&1)" || stop CONFIG_INVALID "$REG"   # built once per decision
@@ -458,14 +523,15 @@ mode_sdd="${SDD_MODE:-strict}"
 used_n=0; used_un=0; used_tok=0; roleused=0; est=null; est_complete=true; hc=null; hcn=0
 uf="$work/$slug/usage.jsonl"
 if [ -f "$uf" ]; then
-  ub="$(jq -sc --arg r "$base" --argjson p "$(jq -c '[.]' <<< "$(prices_json)")" '
+  ub="$(jq -sc --arg r "$base" --argjson pt "$PT" "$PJQ"'
     def tq: (.tq // "actual");
+    map(select(type == "object") | nrm) |
     {n: length, un: (map(select(tq == "unavailable")) | length),
      tok: (map(select(tq != "unavailable") | (.in + .out + .cache_write)) | add // 0),
-     role: (map(select((.role | sub("-deep$"; "")) == $r and tq != "unavailable") | (.in + .out + .cache_write)) | add // 0),
+     role: (map(select((.role // "" | sub("-deep$"; "")) == $r and tq != "unavailable") | (.in + .out + .cache_write)) | add // 0),
      hc: (map(.cost_est_usd // empty) | if length == 0 then null else add end), hcn: (map(select(.cost_est_usd != null)) | length),
-     priced: (map(select(tq != "unavailable" and ($p[0][.model] != null)))), unpriced: (map(select(tq == "unavailable" or ($p[0][.model] == null))) | length)}
-    | . + {est: (if (.priced | length) == 0 then null else (.priced | map(. as $l | $p[0][$l.model] as $pr | (($l.in * ($pr.in // 0)) + ($l.out * ($pr.out // 0)) + ($l.cache_read * ($pr.cache_read // 0)) + ($l.cache_write * ($pr.cache_write // 0))) / 1000000) | add) end)}' "$uf" 2>/dev/null)"
+     priced: (map(select(tq != "unavailable" and cost_of(.) != null))), unpriced: (map(select(tq == "unavailable" or cost_of(.) == null)) | length)}
+    | . + {est: (if (.priced | length) == 0 then null else (.priced | map(cost_of(.)) | add) end)}' "$uf" 2>/dev/null)"
   if [ -n "$ub" ]; then used_n="$(jq .n <<< "$ub")"; used_un="$(jq .un <<< "$ub")"; used_tok="$(jq .tok <<< "$ub")"; roleused="$(jq .role <<< "$ub")"; est="$(jq .est <<< "$ub")"; hc="$(jq .hc <<< "$ub")"; hcn="$(jq .hcn <<< "$ub")"; [ "$(jq .unpriced <<< "$ub")" = 0 ] || est_complete=false; fi
 fi
 acct=complete; [ "$used_un" -gt 0 ] && acct=partial; [ "$used_n" -gt 0 ] && [ "$used_un" = "$used_n" ] && acct=unavailable
@@ -503,6 +569,42 @@ if [ -n "${ROUTE_BUDGET_COST:-}" ]; then
   if [ "$est" = null ] && [ "$hc" = null ]; then D_WARN+=("COST_UNMEASURABLE: no priced usage yet (needs token usage and $KIT_DIR/pricing.json); ROUTE_BUDGET_COST is not evaluated")
   elif [ "$est" != null ] && awk -v e="$est" -v l="$ROUTE_BUDGET_COST" 'BEGIN{exit !(e >= l)}'; then D_WARN+=("COST_ESTIMATE_OVER_BUDGET: estimated \$$est of \$$ROUTE_BUDGET_COST (advisory; not a stop)"); fi
 fi
+# F14 hard cost policy (opt-in): ROUTE_COST_ENFORCE=hard turns the money limits into a stop at the spawn boundary, with reservations. Money stays an
+# ESTIMATE from the user's price table. A scope with an unpriced or unmeasured run, or a model with no price, is UNKNOWN, and unknown never passes a hard limit.
+if [ "${ROUTE_COST_ENFORCE:-off}" = hard ]; then
+  # Fail closed: any value or calculation that cannot be trusted is a CONFIG_INVALID stop (not overridable by --ignore-budget), never an empty or zero figure.
+  hfail() { D_NOTES+=("ROUTE_COST_ENFORCE=hard fails closed: $1"); stop CONFIG_INVALID; }
+  PRICE_PROBE="$(jq -n --argjson pt "$PT" --arg m "$D_MODEL" --arg d "$(date -u +%Y-%m-%d)" "$PJQ"'rate({model: $m, provider: "", ts: $d}) // null')" || hfail "the price table could not be evaluated"
+  price_known=no; [ "$D_MODEL" != "" ] && [ "$PRICE_PROBE" != null ] && price_known=yes
+  # the reservation this run holds: ROUTE_RESERVE_USD if given (validated > 0), else a conservative figure derived from the token cap and the model's dearest rate
+  resv="${ROUTE_RESERVE_USD:-}"; resv_basis="ROUTE_RESERVE_USD"
+  if [ -z "$resv" ]; then
+    cap="${ROUTE_ROLE_TOKENS:-}"; [ -n "$cap" ] && [ "$cap" != 0 ] || cap="${TOKEN_BUDGET_TASK:-}"
+    if isint "$cap" && [ "${cap:-0}" != 0 ] && [ "$price_known" = yes ]; then
+      mr="$(jq -nr --argjson e "$PRICE_PROBE" '[$e.in, $e.out, $e.cache_read, $e.cache_write | select(type == "number")] | max // empty' 2>/dev/null)" && isnum "$mr" && resv="$(awk -v m="$mr" -v c="$cap" 'BEGIN{printf "%.6f", m * c / 1000000}')" || resv=""
+      resv_basis="derived: token cap $cap x the dearest rate of $D_MODEL (every token priced at it)"
+    fi
+  fi
+  ispos "$resv" || hfail "no usable reservation: set ROUTE_RESERVE_USD to a number > 0 (USD held per running role), or set ROUTE_ROLE_TOKENS/TOKEN_BUDGET_TASK and a price for the model so one can be derived"
+  openr="$(open_reserved)" && isnum "$openr" || hfail "open reservations could not be read"
+  hardj='{}'
+  for sc in task role project; do
+    case "$sc" in
+      task)    lim="${ROUTE_BUDGET_COST:-}"; sj="$(CS_ROLE= cost_scope "$work/$slug/usage.jsonl")" || sj="" ;;
+      role)    lim="${ROUTE_ROLE_BUDGET_COST:-}"; sj="$(CS_ROLE="$base" cost_scope "$work/$slug/usage.jsonl")" || sj="" ;;
+      project) lim="${ROUTE_PROJECT_BUDGET_COST:-}"; sj="$(CS_ROLE= cost_scope "$work"/*/usage.jsonl "$work"/_archive/*.usage.jsonl)" || sj="" ;;
+    esac
+    [ -n "$lim" ] || continue
+    su="$(jq -r .usd <<< "$sj" 2>/dev/null)"; sunk="$(jq -r .unmeasured_or_unpriced <<< "$sj" 2>/dev/null)"
+    isnum "$su" && isint "$sunk" || hfail "the $sc spend could not be computed from the usage ledger"
+    hardj="$(jq -c --arg s "$sc" --argjson l "$lim" --argjson u "$su" --argjson k "$sunk" --argjson o "$openr" --argjson r "$resv" '. + {($s): {limit_usd:$l, estimated_usd:$u, unknown_runs:$k, open_reservations_usd:$o, this_reservation_usd:$r, remaining_usd:([$l - $u - $o - $r, 0] | max)}}' <<< "$hardj")" || hfail "the $sc budget could not be computed"
+    if [ "$sunk" -gt 0 ]; then over="${over:+$over; }$sc cost limit unknown: $sunk earlier run(s) have no usage or no price, so spend cannot be shown to be under \$$lim (hard policy: unknown does not pass)"
+    elif awk -v u="$su" -v o="$openr" -v r="$resv" -v l="$lim" 'BEGIN{exit !(u + o + r > l)}'; then over="${over:+$over; }$sc cost limit \$$lim reached (estimated \$$su + reserved \$$openr + this run \$$resv)"; fi
+  done
+  if [ "$price_known" = no ] && [ -n "${ROUTE_BUDGET_COST:-}${ROUTE_ROLE_BUDGET_COST:-}${ROUTE_PROJECT_BUDGET_COST:-}" ]; then
+    over="${over:+$over; }no price for model '${D_MODEL:-(host default)}' in $KIT_DIR/pricing.json: its cost is unknown, and unknown does not pass a hard cost limit"; fi
+  bj="$(jq -c --argjson h "$hardj" --arg rb "$resv_basis" --argjson rv "$resv" '. + {cost_hard:($h + {enforcement:"hard", reservation_usd:$rv, reservation_basis:$rb, basis:"estimate from the user price table, not a bill"})}' <<< "$bj")" || hfail "the budget record could not be built"
+fi
 D_BUDGET="$(jq -c --arg a "$acct" '. + {accounting:$a}' <<< "$bj")"
 
 if [ -n "$over" ] && [ "$mode_sdd" != off ]; then
@@ -521,5 +623,8 @@ fi
 # --- reserve: take the spawn count and record the decision, under the lock so two requests cannot both start the same run
 if [ "$reserve" = 1 ]; then
   [ -f "$work/$slug/state.json" ] && "$here/state.sh" "$slug" spawn >/dev/null 2>&1
+  if [ "${ROUTE_COST_ENFORCE:-off}" = hard ]; then   # held until the outcome reports (route.sh outcome releases and reconciles it); the project lock is still held, so inspect-and-reserve is one step
+    printf '%s\n' "$(jq -nc --arg id "$D_ID" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson u "$resv" --arg r "$base" --arg pid "$pid" '{type:"reserve",id:$id,ts:$ts,role:$r,usd:$u,pid:(if $pid == "" then null else ($pid | tonumber) end)}')" >> "$work/$slug/reservations.jsonl"
+  fi
 fi
 emit
