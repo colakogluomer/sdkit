@@ -55,7 +55,7 @@ the others follow each tool's documented format ([hosts and limits](#15-troubles
 brew tap wecii/sdkit https://github.com/wecii/sdkit.git
 brew trust wecii/sdkit
 brew install sdkit                 # brings jq and node
-sdkit version                      # e.g. "sdkit 1.2.0"
+sdkit version                      # e.g. "sdkit 1.3.0"
 ```
 
 No Homebrew: clone the repo and run `<kit>/bin/sdkit`; `sdkit install` registers a cloned kit for the git hooks.
@@ -73,7 +73,7 @@ sdkit init --ci github              # optional: also install the server-side gat
 *Captured* (abridged), `sdkit init` in a Go repo:
 
 ```
-spec-driven-kit 1.2.0 -> /tmp/sc (host=claude dir=.sdkit mode=plugin stack=go base=main)
+spec-driven-kit 1.3.0 -> /tmp/sc (host=claude dir=.sdkit mode=plugin stack=go base=main)
 rules and stack defaults (project-owned: edit freely)
   wrote  .sdkit/rules/general.md (project-owned: edit it)
   ...

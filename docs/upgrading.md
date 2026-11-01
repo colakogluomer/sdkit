@@ -151,3 +151,14 @@ Nothing changes until you opt in. `ROUTING=off` stays the default, so `run-role.
 - **Per repo:** `sdkit upgrade <repo>` appends the new `ROUTING` / `ROUTE_*` settings to `sdkit.env` (all optional, `ROUTING=off`) and the personal limits to `sdkit.local.env`. It never rewrites your values. Do it on a clean branch.
 - **Exit codes of `run-role.sh` with `ROUTING=on`:** 7 = valid evidence already exists (nothing to run, do not retry), 8 = routing declined to run and there is no valid result (never a pass). Scripts that call `run-role.sh` must handle both.
 - **Turning it on:** set `RUN_ROLE_HOST` (and `VERIFIER_HOST` for independent roles), then `ROUTING=on`; look at a decision first with `route.sh explain --role <role>`. Details and limits: [design-routing.md](design-routing.md).
+
+## 1.3.0: usage and cost accounting, Value Report, F08-F20 scripts, GitHub/GitLab PR hosts
+
+Nothing changes until you opt in; every new setting is off or empty by default.
+
+- **Per repo:** `sdkit upgrade <repo>` appends the new settings to `sdkit.env` / `sdkit.local.env` (`VALUE_REPORT`, `REPORT_BASELINE_MODEL`, `PARALLEL`, `ROUTE_COST_ENFORCE` and related limits) and installs the new runtime scripts. It never rewrites your values.
+- **Value Report:** `VALUE_REPORT=on` (personal) prints a compact report when a task ends and saves it under `work/_reports/`; `sdkit report task|session|latest|history` reads it at any time. Read-only, no model call. See [design-report.md](design-report.md).
+- **Pricing:** `pricing.json` may now be the versioned v2 format (model, provider, effective date); the old flat format still works. See [design-usage.md](design-usage.md).
+- **`parse-verdict.sh`** now distinguishes `MALFORMED[format]` (asked again once) from `MALFORMED[semantic]`; a hand-written parser of its messages should look for both.
+- **Docs are English** from this version on (`docs/`, `CONTRIBUTING.md`).
+- **CI gates:** `init --ci` now writes templates that run the base branch's own gate, and `init --ci gitlab` installs a GitLab merge-request gate. Re-run `sdkit init --ci <host>` only if you want the new template; existing CI files are not overwritten.
