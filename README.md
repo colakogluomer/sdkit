@@ -62,6 +62,84 @@ It adds what is new and never touches your files; manual steps per version are i
 
 ---
 
+## Developer workflow at a glance
+
+Full walk-through, every command and its real output: **[docs/developer-workflow.md](docs/developer-workflow.md)**.
+
+```mermaid
+flowchart LR
+  A["sdkit init + doctor"] --> B["/spec-driven-dev"]
+  B --> C["Intake: analyst brief,<br/>you confirm risk"]
+  C --> D["Plan gate:<br/>you approve the plan"]
+  D --> E["Propose: proposal + DoD<br/>phase proposed"]
+  E --> F["Test first: RED"]
+  F --> G["Implement: GREEN"]
+  G --> H["Independent verification<br/>phase verified"]
+  H -->|PASS| I["PR, merge,<br/>phase done"]
+  H -->|BLOCK| R["one retry, then<br/>you decide"]
+  R --> G
+  I --> J["Value Report"]
+```
+
+The gate phases are `intake → proposed → red → green → verified → pr → done`; specification and planning both happen inside `intake`.
+Budget exhaustion, evidence reuse and recovery branches are in the guide's second diagram.
+
+**Which step am I in?** There is no dashboard; these read-only commands answer it (`KIT="$(sdkit where)"`, run inside your repo):
+
+| Question | Command |
+|---|---|
+| Phase and active task | `$KIT/scripts/sdd.sh status` (`task=rate-limit risk=medium phase=green`) |
+| Which verifier / reviewer / auditor PASS is missing | `$KIT/scripts/sdd.sh evidence` |
+| What the task requires, what each move needs | `$KIT/scripts/sdd.sh policy`, `sdd.sh transitions` |
+| Why was I stopped | the refusal message names the missing step; `sdd.sh gate edit <path>` re-asks |
+| Tokens, cache, cost, budget | `$KIT/scripts/usage.sh report <task>`, `usage.sh budget` |
+| Resume record, interrupted work | `$KIT/scripts/state.sh <task> show`, `$KIT/scripts/recover.sh scan` |
+| Result | `sdkit report task <task>` |
+
+**Agents and orchestration.** Your session is the *orchestrator*; it hands narrow jobs to *roles* (each run is a fresh, separate agent), and a role
+declares a cost tier, never a model name. Not every role runs on every task:
+
+| Role | Runs |
+|---|---|
+| `analyst` | every task: is the request complete, what risk |
+| `engineer` | design and test strategy for medium/high (it designs; it does not implement) |
+| `test-writer`, `developer`, `devsecops` | writing tests, code, pipelines (a low task may skip delegation) |
+| `verifier` | required for medium/high: checks the diff against the Definition of Done, read-only, never sees the implementer's reasoning |
+| `reviewer`, `security-auditor` | required at high; security-auditor also for pipeline/infra changes |
+
+Orchestration adds agent runs, so SDKit does not assume it saves money; the report below says what the records show.
+
+### Task Value Report
+
+`sdkit report task <task>` (printed automatically at task end when `VALUE_REPORT=on`) reads the usage, telemetry and routing records; it calls no model.
+
+**Illustrative Example — Not a Measured Benchmark.** All names and numbers are fictional; the layout is the real compact output.
+
+```
+SDKit Value Report — rate-limit ended COMPLETED after 18m 42s: 6 role execution(s) across 6 role(s); final verification PASS.
+  18m 42s · workflow standard · host claude · files 7 · tests 1p/0f · gates Passed
+  roles:
+    orchestrator [orchestrator] model-medium x1  501,000 tok  $0.5265
+    analyst [subagent] model-small x1  10,500 tok  $0.0165
+    developer [subagent] model-medium x1  208,000 tok  $0.3630
+    engineer [subagent] model-large x1  103,000 tok  $1.2000
+    test-writer [subagent] model-medium x1  99,000 tok  $0.1860
+    verifier [subagent] model-medium x1  75,500 tok  $0.1253
+  usage: 997,000 tokens (in 149,000 out 37,000 cache_read 740,000 cache_write 71,000) · est. API-equivalent cost $2.4173
+  savings: tokens: 25,500 saved (9%, estimated, medium confidence) | cost: $3.0533 (55.8%, estimated)
+  optimizations: Intelligent routing [estimated], Evidence reuse [measured count], Test selection [measured], Context optimization [heuristic], Workflow enforcement [qualitative]
+  validation: tests green pass x1, red fail x1 · verification PASS
+  details: sdkit report task rate-limit --detailed   (--json / --markdown to export)
+```
+
+- Savings are **estimated against a defined baseline**: the same tokens priced on `REPORT_BASELINE_MODEL` (cost), plus avoided executions such as reused evidence (tokens).
+- **Token savings (9%) and cost savings (55.8%) are different metrics**: routing makes tokens cheaper, only avoided runs remove them.
+- Cost is **API-equivalent**, not what a subscription charges; the billed amount is always shown as unavailable.
+- A benefit is listed only when records support it; a missing baseline, price or usage prints `N/A`, never zero.
+- `--detailed` adds the per-role table, token breakdown, method and caveats ([guide §12](docs/developer-workflow.md#12-the-sdkit-value-report)).
+
+---
+
 ## How a task runs
 
 | Risk | What happens |
@@ -129,6 +207,7 @@ To adapt a role, write `.sdkit/roles.d/<role>.md`. `sdkit sync --check` and `sdk
 | `sdkit sync [--check] [dir]` | Refresh the kit's files; `--check` only reports drift |
 | `sdkit upgrade [dir]` | Bring a repo to the installed kit version |
 | `sdkit install` | Register a cloned kit on the machine for the git hooks (not needed with Homebrew) |
+| `sdkit report task\|session\|latest\|history` | The Value Report: what a task or session did, used and saved |
 | `sdkit version`, `sdkit where` | Version, and where the kit lives |
 
 ## Limits
@@ -142,6 +221,7 @@ To adapt a role, write `.sdkit/roles.d/<role>.md`. `sdkit sync --check` and `sdk
 | Read | When |
 |---|---|
 | [docs/README.md](docs/README.md) | Not sure where to start |
+| [docs/developer-workflow.md](docs/developer-workflow.md) | The whole developer journey: init to Value Report, how to see the current phase |
 | [docs/cheatsheet.md](docs/cheatsheet.md) | One-page daily reference (Turkish) |
 | [docs/guide.md](docs/guide.md) | Every skill, role, hook, setting, install flow and limit (Turkish) |
 | [docs/upgrading.md](docs/upgrading.md) | Updating projects between kit versions |
