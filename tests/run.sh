@@ -166,6 +166,30 @@ for pair in "go:go.mod:module x" "spring-boot:pom.xml:<project><parent><artifact
   d="$tmp/init-$st"; mkdir -p "$d"; git -C "$d" init -q -b main; printf '%s' "$content" > "$d/$file"
   expect "init detects $st" 0 bash -c "'$ROOT/bin/init.sh' '$d' >/dev/null && grep -q '^STACK=$st' '$d/.sdkit/sdkit.env'"
 done
+# an Expo app with a prebuilt android/ (it has a build.gradle) is still react-native
+rna="$tmp/init-rn-android"; mkdir -p "$rna/android"; git -C "$rna" init -q -b main
+printf '{"dependencies":{"expo":"54","react-native":"0.81"}}' > "$rna/package.json"; : > "$rna/android/build.gradle"
+expect "init detects react-native with a prebuilt android/" 0 bash -c "'$ROOT/bin/init.sh' '$rna' >/dev/null && grep -q '^STACK=react-native' '$rna/.sdkit/sdkit.env'"
+# known-pitfalls: stack seed when the stack has one, the neutral template otherwise
+expect "init go seeds the typed-nil pitfall" 0 grep -q 'typed-nil' "$tmp/init-go/.sdkit/known-pitfalls.md"
+expect "init react-native gets no Go pitfall" 1 grep -q 'typed-nil' "$tmp/init-react-native/.sdkit/known-pitfalls.md"
+# doctor: third-party skills in .agents/skills are not a non-Claude host install
+mkdir -p "$rna/.agents/skills/foo"; echo '# foo' > "$rna/.agents/skills/foo/SKILL.md"
+expect "doctor ignores third-party .agents/skills" 1 bash -c "'$ROOT/bin/doctor.sh' '$rna' 2>&1 | grep -qE 'AGENTS.md missing|scripts/verify.sh missing|spec-driven-dev missing'"
+cx="$tmp/init-codex-only"; mkdir -p "$cx"; git -C "$cx" init -q -b main; printf 'module x' > "$cx/go.mod"
+expect "doctor still checks a real non-Claude install" 0 bash -c "'$ROOT/bin/init.sh' --host codex '$cx' >/dev/null && '$ROOT/bin/doctor.sh' '$cx' 2>&1 | grep -q 'ok    AGENTS.md present'"
+# doctor: the project.md TODO check passes once the placeholders are gone (the template's explanatory `TODO` stays)
+expect "doctor fails on a fresh project.md" 0 bash -c "'$ROOT/bin/doctor.sh' '$rna' 2>&1 | grep -q 'project.md still has TODO placeholders'"
+sed -i.bak '/^.*`TODO` remains/!s/TODO//g' "$rna/.sdkit/project.md" && rm -f "$rna/.sdkit/project.md.bak"
+expect "doctor accepts project.md with only the explanatory TODO" 0 bash -c "grep -q '\`TODO\`' '$rna/.sdkit/project.md' && '$ROOT/bin/doctor.sh' '$rna' 2>&1 | grep -q 'ok    project.md filled in'"
+# a tool installed as a devDependency (node_modules/.bin) counts as installed
+noprettier="$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do [ -x "$d/prettier" ] || printf '%s\n' "$d"; done | paste -sd: -)"
+expect "doctor warns when prettier is nowhere" 0 bash -c "PATH='$noprettier' '$ROOT/bin/doctor.sh' '$rna' 2>&1 | grep -q 'warn  prettier missing'"
+mkdir -p "$rna/node_modules/.bin"; printf '#!/bin/sh\n' > "$rna/node_modules/.bin/prettier"; chmod +x "$rna/node_modules/.bin/prettier"
+expect "doctor accepts prettier from node_modules/.bin" 0 bash -c "PATH='$noprettier' '$ROOT/bin/doctor.sh' '$rna' 2>&1 | grep -q 'ok    prettier installed'"
+expect "check-tools hook accepts prettier from node_modules/.bin" 1 bash -c "echo '{}' | PATH='$noprettier' CLAUDE_PROJECT_DIR='$rna' '$ROOT/hooks/check-tools.sh' | grep -q -- '- prettier'"
+rm "$rna/node_modules/.bin/prettier"
+expect "check-tools hook reports prettier when it is nowhere" 0 bash -c "echo '{}' | PATH='$noprettier' CLAUDE_PROJECT_DIR='$rna' '$ROOT/hooks/check-tools.sh' | grep -q -- '- prettier'"
 # python / generic verify
 pyd="$tmp/py-verify"; mkdir -p "$pyd"; git -C "$pyd" init -q -b main; ( cd "$pyd" && git config user.email t@t && git config user.name t && printf '[project]\n' > pyproject.toml && git add -A && git commit -qm b && git checkout -qb f ) >/dev/null 2>&1
 echo 'def g(:' > "$pyd/bad.py"; expect "python verify fails on a syntax error" 1 bash -c "cd '$pyd' && '$ROOT/stacks/python/scripts/verify.sh' --fast --no-cache"

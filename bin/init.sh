@@ -76,7 +76,7 @@ for h in $(printf '%s' "$HOSTS" | tr ',' ' '); do [ "$h" = claude ] || OTHER_HOS
 command -v jq >/dev/null || { say "jq is required"; exit 1; }
 git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&1 || { say "$TARGET is not a git repository"; exit 1; }
 
-STACKS="go spring-boot jvm react-native nextjs python generic"
+STACKS="go spring-boot react-native jvm nextjs python generic"
 if [ -z "$STACK" ]; then
   for s in $STACKS; do [ -x "$SCAFFOLD_ROOT/stacks/$s/detect.sh" ] && "$SCAFFOLD_ROOT/stacks/$s/detect.sh" "$TARGET" && { STACK="$s"; break; }; done
 fi
@@ -123,7 +123,8 @@ say "project profile (project-owned: fill in)"
 ENV_NEW=0; [ -f "$TARGET/$KIT_DIR/$ENV_FILE" ] || ENV_NEW=1
 install_template templates/sdkit.env "$KIT_DIR/$ENV_FILE"
 install_template templates/project.md "$KIT_DIR/project.md"
-install_template templates/known-pitfalls.md "$KIT_DIR/known-pitfalls.md"
+pitfalls_tpl=templates/known-pitfalls.md; [ -f "$SCAFFOLD_ROOT/stacks/$STACK/known-pitfalls.md" ] && pitfalls_tpl="stacks/$STACK/known-pitfalls.md"
+install_template "$pitfalls_tpl" "$KIT_DIR/known-pitfalls.md"
 install_template templates/adr/TEMPLATE.md "$KIT_DIR/adr/TEMPLATE.md"
 install_template "$GITIGNORE_TPL" "$KIT_DIR/.gitignore"
 if want_host claude; then

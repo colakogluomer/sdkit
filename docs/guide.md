@@ -451,7 +451,7 @@ verify.sh [--fast] [--since-head] [--no-cache]
 | `nextjs` | `next` in `package.json` | per-package typecheck, unless `--fast` lint and test; `next build` if `VERIFY_BUILD` is set; package manager from the lockfile or `NODE_PM` |
 | `react-native` | `react-native` in `package.json` | typecheck/lint/test; shares the `stacks/_node/scripts/node-lib.sh` helper with `nextjs` |
 
-Every stack provides: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`. The full contract is in `stacks/README.md`. A repo has **a single `STACK`**; a monorepo with multiple stacks is out of scope.
+Every stack provides: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`, and optionally a `known-pitfalls.md` seed (otherwise `init` writes the neutral template). The full contract is in `stacks/README.md`. A repo has **a single `STACK`**; a monorepo with multiple stacks is out of scope.
 Stack rule: verify only what changed, keep `--fast` really cheap, a missing tool is a `warn` (skipped), print little output.
 
 ### verify.d protocol
@@ -664,7 +664,7 @@ git clone <this-repo> ~/spec-driven-kit
 ~/spec-driven-kit/bin/doctor.sh /path/repo    # until there are 0 failures
 git add <project-dir> .claude && git commit      # <project-dir>: the directory init wrote
 ```
-`init.sh` options: `--host` (comma-separated list: `claude,codex,opencode,cursor,gemini`; default `claude`), `--dir .sdkit` (default; an existing legacy directory is kept), `--no-memory`, `--memory-vcs commit|ignore`, `--mode plugin|copy` (Claude only), `--stack go|spring-boot|jvm|python|nextjs|react-native|generic` (if not given, `go`, `spring-boot`, `jvm`, `react-native`, `nextjs`, `python` are detected in this order; the first match wins, `generic` if none), `--marketplace-url <url>`, `--force`. **It never overwrites project-side files (project.*, rules, settings.json ...), even if they exist**;
+`init.sh` options: `--host` (comma-separated list: `claude,codex,opencode,cursor,gemini`; default `claude`), `--dir .sdkit` (default; an existing legacy directory is kept), `--no-memory`, `--memory-vcs commit|ignore`, `--mode plugin|copy` (Claude only), `--stack go|spring-boot|jvm|python|nextjs|react-native|generic` (if not given, `go`, `spring-boot`, `react-native`, `jvm`, `nextjs`, `python` are detected in this order; the first match wins, `generic` if none), `--marketplace-url <url>`, `--force`. **It never overwrites project-side files (project.*, rules, settings.json ...), even if they exist**;
 they are written once and are yours after that. `--force` overwrites only the (managed) files copied from the kit in copy mode.
 
 ### Developer (repo already set up)
@@ -676,9 +676,9 @@ claude      # accept trust and the plugin
 If the prompt does not appear: `/plugin marketplace add <bu-repo-url>` and `/plugin install spec-driven-kit@spec-driven-kit`.
 
 ### What `doctor.sh` checks
-`jq`, git repository · whether `sdkit.env` loads, `BASE_BRANCH` exists, `VERIFY_CMD` is executable · whether `project.md` is filled in and has a risk rubric ·
+`jq`, git repository · whether `sdkit.env` loads, `BASE_BRANCH` exists, `VERIFY_CMD` is executable · whether `project.md` is filled in (no bare `TODO` left) and has a risk rubric ·
 `known-pitfalls.md`, `CLAUDE.md`, `<project-dir>/.gitignore` · whether there is an active `verify.d` policy (warning if not) · whether `settings.json` is valid and has a `deny` list ·
-in plugin mode whether the plugin is enabled and the marketplace address is defined, in copy mode whether the hooks are wired · non-Claude hosts: `AGENTS.md`, `.agents/skills`, whether kit scripts (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) are executable, `hooks/adapt.sh`, `core.hooksPath`, role files for the installed host (`.codex/agents`, `.opencode/agents` + guard plugin, `.cursor/agents` + valid `hooks.json`, `.gemini/agents` + valid `settings.json`) · whether each host's CLI is installed (warning only: only `run-role.sh` needs it) · the stack's `tools.sh` list (failure if a `required` one is missing, warning if an `optional` one is missing) and `openspec`.
+in plugin mode whether the plugin is enabled and the marketplace address is defined, in copy mode whether the hooks are wired · non-Claude hosts (detected by the kit block in `AGENTS.md` or `.agents/skills/spec-driven-dev`; third-party skills in `.agents/skills` from `npx skills add` do not count): `AGENTS.md`, `.agents/skills`, whether kit scripts (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) are executable, `hooks/adapt.sh`, `core.hooksPath`, role files for the installed host (`.codex/agents`, `.opencode/agents` + guard plugin, `.cursor/agents` + valid `hooks.json`, `.gemini/agents` + valid `settings.json`) · whether each host's CLI is installed (warning only: only `run-role.sh` needs it) · the stack's `tools.sh` list (on `PATH` or in the repo's `node_modules/.bin`; failure if a `required` one is missing, warning if an `optional` one is missing) and `openspec`.
 
 ### `upgrade.sh` (updating)
 Moves a project that uses the kit to the new version: detects the hosts (from the presence of `.codex/`, `.opencode/agents`, `.cursor/agents`, `.gemini/agents`; `AGENTS.md`/`.agents/skills` for the old 0.3 Codex layout), the mode and the stack, adds new files (does not touch existing ones), adds missing lines to `.gitignore`, runs `sync.sh` in copy or non-Claude installs, and finishes with `doctor.sh`. The plugin side is refreshed separately with `/plugin`. Details and manual steps per version: [upgrading.md](upgrading.md). **Claude projects in copy mode:** `.claude/settings.json` is owned by the project, so new hooks (`guard-readonly` for PreToolUse `Bash|Edit|Write|NotebookEdit`, `usage-log` for Stop and SubagentStop) must be merged by hand; source `templates/settings.copy.json`.
@@ -776,7 +776,7 @@ spec-driven-kit/
 ├── stacks/
 │   ├── README.md          stack contract
 │   ├── _node/scripts/     node-lib.sh (shared by nextjs and react-native)
-│   ├── go/                detect.sh, permissions.txt, golangci.yml, rules/, verify.d.example/,
+│   ├── go/                detect.sh, permissions.txt, golangci.yml, known-pitfalls.md, rules/, verify.d.example/,
 │   │   └── scripts/       verify.sh (wrapper), steps.sh, fmt.sh, tools.sh
 │   └── spring-boot/ jvm/ python/ nextjs/ react-native/ generic/    same structure
 ├── tests/                 run.sh (script smoke tests), sdd.test.sh, shared.test.sh, memory.test.sh, hardening.test.sh, telemetry.test.sh, usage.test.sh, budget.test.sh, route.test.sh

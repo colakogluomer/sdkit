@@ -152,6 +152,14 @@ Nothing changes until you opt in. `ROUTING=off` stays the default, so `run-role.
 - **Exit codes of `run-role.sh` with `ROUTING=on`:** 7 = valid evidence already exists (nothing to run, do not retry), 8 = routing declined to run and there is no valid result (never a pass). Scripts that call `run-role.sh` must handle both.
 - **Turning it on:** set `RUN_ROLE_HOST` (and `VERIFIER_HOST` for independent roles), then `ROUTING=on`; look at a decision first with `route.sh explain --role <role>`. Details and limits: [design-routing.md](design-routing.md).
 
+## 1.3.1: fewer false failures on React Native / Expo setups
+
+No manual step is required.
+
+- **Stack detection:** an Expo app with a prebuilt `android/` is now detected as `react-native`. If an earlier `init` gave such a repo another stack, set `STACK=react-native` in `sdkit.env`.
+- **`known-pitfalls.md`:** the template no longer ships a Go entry; Go repos get it from `stacks/go/known-pitfalls.md`. An existing file is yours and is not touched: delete the `typed-nil interface` entry if your repo is not Go.
+- **`doctor`:** third-party skills in `.agents/skills/` no longer trigger the non-Claude host checks, a tool installed in `node_modules/.bin` counts as installed, and the `project.md` check ignores the template's explanatory `` `TODO` `` line.
+
 ## 1.3.0: usage and cost accounting, Value Report, F08-F20 scripts, GitHub/GitLab PR hosts
 
 Nothing changes until you opt in; every new setting is off or empty by default.

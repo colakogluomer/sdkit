@@ -72,7 +72,8 @@ fi
 
 project_md="$TARGET/$KIT_DIR/project.md"
 if [ -f "$project_md" ]; then
-  grep -q 'TODO' "$project_md" && bad "project.md still has TODO placeholders" || ok "project.md filled in"
+  # a bare TODO only: the template's own explanatory line quotes it as `TODO`
+  grep -qE '(^|[^`])TODO($|[^`])' "$project_md" && bad "project.md still has TODO placeholders" || ok "project.md filled in"
   grep -q '`high`' "$project_md" && ok "risk rubric present" || bad "project.md has no risk rubric"
 else
   bad "$KIT_DIR/project.md missing"
@@ -109,7 +110,11 @@ has_codex=0; has_opencode=0; has_cursor=0; has_gemini=0
 [ -d "$TARGET/.opencode" ] && has_opencode=1
 [ -d "$TARGET/.cursor" ] && has_cursor=1
 [ -d "$TARGET/.gemini" ] && has_gemini=1
-if [ -f "$TARGET/AGENTS.md" ] || [ -d "$TARGET/.agents/skills" ]; then
+# a non-Claude host install: the kit block in AGENTS.md or the kit's own skill. Any other .agents/skills/ content
+# (third-party skills from `npx skills add`) is not a host install and must not trigger the host checks.
+has_agents_host=0
+{ grep -qs 'spec-driven-kit:begin' "$TARGET/AGENTS.md" || [ -d "$TARGET/.agents/skills/spec-driven-dev" ]; } && has_agents_host=1
+if [ "$has_agents_host" = 1 ]; then
   [ -f "$TARGET/AGENTS.md" ] && ok "AGENTS.md present" || bad "AGENTS.md missing"
   [ -f "$TARGET/.agents/skills/spec-driven-dev/SKILL.md" ] && ok "skills installed in .agents/skills" || bad ".agents/skills/spec-driven-dev missing (run init.sh --host <host>)"
   for s in verify verify-core env guard plan-waves worktree resolve-base state parse-verdict check-plan-parity check-writes usage memory lookup-cache run-role route workflow contract telemetry dod-check audit redact digest adapter dispatch knowledge recover test-select pr-check; do
@@ -185,7 +190,7 @@ tools="$TARGET/$KIT_DIR/scripts/tools.sh"; [ -x "$tools" ] || tools="$SCAFFOLD_R
 if [ -x "$tools" ]; then
   while IFS='|' read -r kind cmd hint; do
     [ -n "$cmd" ] || continue
-    if command -v "$cmd" >/dev/null; then ok "$cmd installed"
+    if command -v "$cmd" >/dev/null || [ -x "$TARGET/node_modules/.bin/$cmd" ]; then ok "$cmd installed"
     elif [ "$kind" = required ]; then bad "$cmd missing: $hint"
     else warn "$cmd missing: $hint"; fi
   done < <("$tools")
@@ -201,7 +206,7 @@ if [ -d "$TARGET/openspec" ]; then
   if [ -f "$TARGET/.claude/settings.json" ] || [ -f "$TARGET/.claude/settings.local.json" ] || [ -d "$TARGET/.claude/skills" ]; then
     [ -d "$TARGET/.claude/skills/openspec-propose" ] && ok "openspec skills present for Claude Code" || warn "openspec skills missing in .claude/skills: run 'openspec update' (or init with --tools claude)"
   fi
-  if [ -d "$TARGET/.agents/skills" ]; then
+  if [ "$has_agents_host" = 1 ]; then
     [ -d "$TARGET/.agents/skills/openspec-propose" ] && ok "openspec skills present in .agents/skills" || warn "openspec skills missing in .agents/skills: run 'openspec update'"
   fi
 fi

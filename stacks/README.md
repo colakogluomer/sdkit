@@ -15,6 +15,8 @@ stacks/<stack>/
   rules/*.md             default conventions copied into <project-dir>/rules/ (project-owned afterwards)
   verify.d.example/*.example   example project policies (FAIL:/WARN: protocol, see verify-lib.sh)
   <config files>         e.g. golangci.yml, copied to <project-dir>/
+  known-pitfalls.md      optional seed for <project-dir>/known-pitfalls.md (stack-specific bug classes); init uses
+                         templates/known-pitfalls.md (header and format, no entries) when absent
 ```
 
 ## stack_run contract (steps.sh)
