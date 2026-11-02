@@ -193,7 +193,7 @@ if [ -x "$tools" ]; then
     if command -v "$cmd" >/dev/null || [ -x "$TARGET/node_modules/.bin/$cmd" ]; then ok "$cmd installed"
     elif [ "$kind" = required ]; then bad "$cmd missing: $hint"
     else warn "$cmd missing: $hint"; fi
-  done < <("$tools")
+  done < <("$tools" "$TARGET")
 fi
 # OpenSpec is a permanent part of the workflow: the CLI, the openspec/ directory and its skills for the repo's hosts
 if command -v openspec >/dev/null 2>&1; then

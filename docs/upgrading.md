@@ -152,6 +152,14 @@ Nothing changes until you opt in. `ROUTING=off` stays the default, so `run-role.
 - **Exit codes of `run-role.sh` with `ROUTING=on`:** 7 = valid evidence already exists (nothing to run, do not retry), 8 = routing declined to run and there is no valid result (never a pass). Scripts that call `run-role.sh` must handle both.
 - **Turning it on:** set `RUN_ROLE_HOST` (and `VERIFIER_HOST` for independent roles), then `ROUTING=on`; look at a decision first with `route.sh explain --role <role>`. Details and limits: [design-routing.md](design-routing.md).
 
+## 1.5.0: Expo checks
+
+Only `react-native` repos are affected; nothing new runs until you enable it.
+
+- **New `verify.d` example** `40-expo.sh.example`: `expo install --check` when a `package.json` changes (FAIL on SDK-misaligned versions, WARN when it cannot run), a prebuild reminder when `app.json` / `app.config.*` plugins or `ios` / `android` settings change, and a WARN on NativeWind transform/shadow/transition/ring classes inside a conditional `className`. To use it: `cp "$(sdkit where)/stacks/react-native/verify.d.example/40-expo.sh.example" .sdkit/verify.d/40-expo.sh && chmod +x .sdkit/verify.d/40-expo.sh`.
+- **Lint without eslint:** if a package has no `lint` script and no local eslint but a local prettier, verify runs `prettier --check` on the changed files instead of skipping lint. A formatting difference is a failure; `prettier --write` fixes it.
+- **Tools:** `doctor` and the `check-tools` hook show `xcrun` (macOS) / `adb` hints, as warnings only, when `ios/` / `android/` exist. `tools.sh` and `steps.sh` are managed copies: `sdkit upgrade` refreshes them (plugin mode uses the updated plugin).
+
 ## 1.4.0: Expo rules and React Native pitfalls
 
 Only `react-native` repos are affected. Rules and `known-pitfalls.md` are project-owned, so `sdkit upgrade` does not add or change them in an existing repo.

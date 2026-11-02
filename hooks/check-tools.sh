@@ -11,7 +11,7 @@ tools="$PROJECT_DIR/$KIT_DIR/scripts/tools.sh"
 # tools.sh lines: required|<command>|<hint> or optional|<command>|<hint>
 [ -x "$tools" ] && while IFS='|' read -r kind cmd hint; do
   [ -n "$cmd" ] && need "$cmd" "$hint"
-done < <("$tools")
+done < <("$tools" "$PROJECT_DIR")
 need openspec "npm install -g @fission-ai/openspec"
 [ -z "$missing" ] && exit 0
 jq -n --arg m "$(printf 'spec-driven-kit: missing tools, tell the user once:%b' "$missing")" \

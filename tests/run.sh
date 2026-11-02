@@ -202,6 +202,37 @@ printf '%s\n' 'const L = () => (' '  <FlatList' '    data={d}' '    renderItem={
 rnpol() { (cd "$rnp" && VERIFY_LIB="$ROOT/scripts/verify-lib.sh" VERIFY_MERGE_BASE="$rnbase" VERIFY_CHANGED="$1" VERIFY_CHANGED_SRC="$1" bash "$ROOT/stacks/react-native/verify.d.example/10-forbidden-patterns.sh.example"); }
 expect "rn policy warns on style={{ inside renderItem" 0 bash -c "$(declare -f rnpol); rnp='$rnp' rnbase='$rnbase' ROOT='$ROOT'; rnpol List.tsx | grep -q 'WARN: List.tsx has an inline style'"
 expect "rn policy is quiet on style={{ outside renderItem" 1 bash -c "$(declare -f rnpol); rnp='$rnp' rnbase='$rnbase' ROOT='$ROOT'; rnpol Card.tsx | grep -q 'inline style'"
+# --- Expo checks (PR: rn-expo-checks) ---
+ex="$tmp/expo-app"; mkdir -p "$ex/.claude" "$ex/node_modules/.bin"; git -C "$ex" init -q -b main
+printf 'STACK=react-native\n' > "$ex/.claude/project.env"; printf 'node_modules/\n.claude/\n' > "$ex/.gitignore"
+printf '{"dependencies":{"expo":"54","react-native":"0.81","nativewind":"4"}}' > "$ex/package.json"
+printf '{"expo":{"name":"a","plugins":["expo-router"]}}' > "$ex/app.json"
+( cd "$ex" && git config user.email t@t && git config user.name t && git add -A && git commit -qm b ) >/dev/null 2>&1
+exbase="$(git -C "$ex" rev-parse HEAD)"
+expol() { (cd "$ex" && VERIFY_LIB="$ROOT/scripts/verify-lib.sh" VERIFY_MERGE_BASE="$exbase" VERIFY_CHANGED="$1" VERIFY_CHANGED_SRC="$1" bash "$ROOT/stacks/react-native/verify.d.example/40-expo.sh.example"); }
+printf '#!/bin/sh\necho "The following packages should be updated for best compatibility with the installed expo version:"\necho "  - react-native-reanimated@3.0.0 - expected version: ~4.1.0"\nexit 1\n' > "$ex/node_modules/.bin/expo"; chmod +x "$ex/node_modules/.bin/expo"
+expect "expo policy fails on SDK-misaligned dependencies" 0 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol package.json | grep -q '^FAIL: package.json: dependencies do not match'"
+printf '#!/bin/sh\nexit 0\n' > "$ex/node_modules/.bin/expo"
+expect "expo policy is quiet on aligned dependencies" 1 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol package.json | grep -q 'FAIL'"
+printf '{"expo":{"name":"b","plugins":["expo-router"]}}' > "$ex/app.json"
+expect "expo policy ignores a non-native app.json change" 1 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol app.json | grep -q 'prebuild'"
+printf '{"expo":{"name":"b","plugins":["expo-router","expo-camera"]}}' > "$ex/app.json"
+expect "expo policy asks for prebuild on a plugin change" 0 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol app.json | grep -q 'WARN: app.json: plugins or ios/android settings changed'"
+echo 'const A = ({ p }) => <View className="scale-95 rounded" />;' > "$ex/A.tsx"
+expect "expo policy is quiet on a static NativeWind transform class" 1 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol A.tsx | grep -q 'conditional NativeWind'"
+echo 'const B = ({ p }) => <Pressable className={p ? "scale-95 opacity-80" : "opacity-100"} />;' > "$ex/B.tsx"
+expect "expo policy warns on a toggled NativeWind transform class" 0 bash -c "$(declare -f expol); ex='$ex' exbase='$exbase' ROOT='$ROOT'; expol B.tsx | grep -q 'WARN: conditional NativeWind'"
+rm -f "$ex/A.tsx" "$ex/B.tsx"; git -C "$ex" checkout -q -- app.json
+# RN lint: no eslint but a local prettier -> prettier --check on the changed files
+echo 'export const x = 1;' > "$ex/x.tsx"
+printf '#!/bin/sh\necho "[warn] x.tsx"\nexit 1\n' > "$ex/node_modules/.bin/prettier"; chmod +x "$ex/node_modules/.bin/prettier"
+expect "rn verify runs prettier --check without eslint" 0 bash -c "cd '$ex' && out=\$('$ROOT/stacks/react-native/scripts/verify.sh' --no-cache); [ \$? = 1 ] && printf '%s' \"\$out\" | grep -q 'FAIL: prettier --check'"
+printf '#!/bin/sh\nexit 0\n' > "$ex/node_modules/.bin/prettier"
+expect "rn verify passes a clean prettier --check" 0 bash -c "cd '$ex' && '$ROOT/stacks/react-native/scripts/verify.sh' --no-cache"
+# RN tools: device tooling hints only when the native projects exist
+expect "rn tools: no adb hint without android/" 1 bash -c "'$ROOT/stacks/react-native/scripts/tools.sh' '$ex' | grep -q '|adb|'"
+mkdir -p "$ex/android"
+expect "rn tools: adb hint with android/" 0 bash -c "'$ROOT/stacks/react-native/scripts/tools.sh' '$ex' | grep -q '^optional|adb|'"
 # python / generic verify
 pyd="$tmp/py-verify"; mkdir -p "$pyd"; git -C "$pyd" init -q -b main; ( cd "$pyd" && git config user.email t@t && git config user.name t && printf '[project]\n' > pyproject.toml && git add -A && git commit -qm b && git checkout -qb f ) >/dev/null 2>&1
 echo 'def g(:' > "$pyd/bad.py"; expect "python verify fails on a syntax error" 1 bash -c "cd '$pyd' && '$ROOT/stacks/python/scripts/verify.sh' --fast --no-cache"
