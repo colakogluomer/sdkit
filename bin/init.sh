@@ -321,4 +321,14 @@ if [ "$OTHER_HOSTS" = 1 ]; then
   want_host cursor && say "Cursor: the kit's hooks were merged into .cursor/hooks.json next to yours; hooks and subagents may be IDE-only (see docs/guide.md section 13)."
   want_host gemini && say "Gemini CLI: the kit's hooks and context file were merged into .gemini/settings.json next to your settings; subagents may need the experimental flag."
 fi
+if [ "$STACK" = react-native ]; then
+  # third-party skills are referenced, never vendored: they change upstream every week (docs/guide.md, Stacks)
+  has_expo=0
+  while IFS= read -r p; do jq -e '(.dependencies.expo // .devDependencies.expo) // empty' "$p" >/dev/null 2>&1 && has_expo=1; done \
+    < <(find "$TARGET" -maxdepth 3 -name package.json -not -path '*/node_modules/*' 2>/dev/null)
+  say "React Native: optional third-party skills (not part of the kit; install them yourself):"
+  [ "$has_expo" = 1 ] && say "  Expo (expo-router, expo-native-ui, expo-data-fetching ...): claude plugin install expo@claude-plugins-official   other hosts: npx skills add expo/skills"
+  say "  React Native rules: npx skills add vercel-labs/agent-skills   performance: npx skills add callstackincubator/agent-skills"
+  say "  (npx skills add writes .agents/skills/; doctor does not count it as a host install)"
+fi
 [ "${OPENSPEC_PENDING:-0}" = 1 ] && say "NOTE: the workflow needs OpenSpec; doctor will fail until it is installed and initialised." || true

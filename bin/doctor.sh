@@ -195,6 +195,14 @@ if [ -x "$tools" ]; then
     else warn "$cmd missing: $hint"; fi
   done < <("$tools" "$TARGET")
 fi
+# react-native: third-party skills that upstream renamed or removed still sit in the repo (installed with npx skills add)
+if [ "$STACK" = react-native ]; then
+  for s in building-native-ui expo-tailwind-setup; do
+    for d in .agents/skills .claude/skills; do
+      [ -e "$TARGET/$d/$s" ] && warn "$d/$s is an outdated Expo skill (removed upstream): remove it and install the current set (claude plugin install expo@claude-plugins-official, or npx skills add expo/skills)" && break
+    done
+  done
+fi
 # OpenSpec is a permanent part of the workflow: the CLI, the openspec/ directory and its skills for the repo's hosts
 if command -v openspec >/dev/null 2>&1; then
   ok "openspec CLI installed ($(openspec --version 2>/dev/null | head -1); the kit was tested with 1.13.x)"

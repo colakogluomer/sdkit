@@ -233,6 +233,16 @@ expect "rn verify passes a clean prettier --check" 0 bash -c "cd '$ex' && '$ROOT
 expect "rn tools: no adb hint without android/" 1 bash -c "'$ROOT/stacks/react-native/scripts/tools.sh' '$ex' | grep -q '|adb|'"
 mkdir -p "$ex/android"
 expect "rn tools: adb hint with android/" 0 bash -c "'$ROOT/stacks/react-native/scripts/tools.sh' '$ex' | grep -q '^optional|adb|'"
+# --- React Native skill recommendations (PR: rn-skill-ecosystem) ---
+for k in expo bare; do d="$tmp/skills-$k"; mkdir -p "$d"; git -C "$d" init -q -b main; done
+printf '{"dependencies":{"expo":"54","react-native":"0.81"}}' > "$tmp/skills-expo/package.json"
+printf '{"dependencies":{"react-native":"0.81"}}' > "$tmp/skills-bare/package.json"
+expect "init recommends the Expo skills on an Expo app" 0 bash -c "'$ROOT/bin/init.sh' '$tmp/skills-expo' 2>&1 | grep -q 'claude plugin install expo@claude-plugins-official'"
+expect "init skips the Expo skills on a bare RN app" 0 bash -c "out=\$('$ROOT/bin/init.sh' '$tmp/skills-bare' 2>&1); printf '%s' \"\$out\" | grep -q 'vercel-labs/agent-skills' && ! printf '%s' \"\$out\" | grep -q 'expo/skills'"
+expect "init recommends no RN skills on other stacks" 0 bash -c "out=\$('$ROOT/bin/init.sh' '$tmp/init-go' 2>&1); printf '%s' \"\$out\" | grep -q '^done. next' && ! printf '%s' \"\$out\" | grep -q 'React Native: optional'"
+mkdir -p "$tmp/skills-expo/.agents/skills/building-native-ui"
+expect "doctor warns about an outdated Expo skill" 0 bash -c "'$ROOT/bin/doctor.sh' '$tmp/skills-expo' 2>&1 | grep -q 'warn  .agents/skills/building-native-ui is an outdated Expo skill'"
+expect "doctor: third-party skills still are not a host install" 1 bash -c "'$ROOT/bin/doctor.sh' '$tmp/skills-expo' 2>&1 | grep -q 'AGENTS.md missing'"
 # python / generic verify
 pyd="$tmp/py-verify"; mkdir -p "$pyd"; git -C "$pyd" init -q -b main; ( cd "$pyd" && git config user.email t@t && git config user.name t && printf '[project]\n' > pyproject.toml && git add -A && git commit -qm b && git checkout -qb f ) >/dev/null 2>&1
 echo 'def g(:' > "$pyd/bad.py"; expect "python verify fails on a syntax error" 1 bash -c "cd '$pyd' && '$ROOT/stacks/python/scripts/verify.sh' --fast --no-cache"

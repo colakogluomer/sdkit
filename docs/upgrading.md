@@ -152,6 +152,10 @@ Nothing changes until you opt in. `ROUTING=off` stays the default, so `run-role.
 - **Exit codes of `run-role.sh` with `ROUTING=on`:** 7 = valid evidence already exists (nothing to run, do not retry), 8 = routing declined to run and there is no valid result (never a pass). Scripts that call `run-role.sh` must handle both.
 - **Turning it on:** set `RUN_ROLE_HOST` (and `VERIFIER_HOST` for independent roles), then `ROUTING=on`; look at a decision first with `route.sh explain --role <role>`. Details and limits: [design-routing.md](design-routing.md).
 
+## 1.5.1: React Native skill recommendations
+
+No manual step. On `react-native` repos `init` now recommends the Expo, Vercel and Callstack skill sets (installed by you, never vendored), and `doctor` warns when `.agents/skills` or `.claude/skills` still holds `building-native-ui` or `expo-tailwind-setup`, which upstream removed. See [guide.md](guide.md), section Stacks.
+
 ## 1.5.0: Expo checks
 
 Only `react-native` repos are affected; nothing new runs until you enable it.

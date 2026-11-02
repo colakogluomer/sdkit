@@ -454,6 +454,18 @@ verify.sh [--fast] [--since-head] [--no-cache]
 Every stack provides: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`, and optionally a `known-pitfalls.md` seed (otherwise `init` writes the neutral template). The full contract is in `stacks/README.md`. A repo has **a single `STACK`**; a monorepo with multiple stacks is out of scope.
 Stack rule: verify only what changed, keep `--fast` really cheap, a missing tool is a `warn` (skipped), print little output.
 
+#### React Native / Expo: third-party skills
+The kit does not vendor framework skills: they change upstream every week and install in one command. For `STACK=react-native`, `init` prints these recommendations (the Expo one only when `expo` is a dependency):
+
+| Skill set | Install | Use |
+|---|---|---|
+| Expo (`expo/skills`, MIT: expo-router, expo-native-ui, expo-design-system, expo-data-fetching, expo-animation, eas-*) | Claude Code: `claude plugin install expo@claude-plugins-official`; other hosts: `npx skills add expo/skills` | Expo apps |
+| `vercel-react-native-skills` (`vercel-labs/agent-skills`, MIT) | `npx skills add vercel-labs/agent-skills` | React Native rules |
+| `react-native-best-practices` (`callstackincubator/agent-skills`, MIT) | `npx skills add callstackincubator/agent-skills` | Performance |
+| NativeWind migration skills (NativeWind team, MIT) | from the NativeWind repository | Only when upgrading NativeWind |
+
+`npx skills add` writes the skills to `.agents/skills/` (and may link them from `.claude/skills/`). That is not a non-Claude host install: `doctor` runs its host checks only when the kit's block is in `AGENTS.md` or `.agents/skills/spec-driven-dev` exists. On `react-native` repos, `doctor` warns about Expo skills that upstream has removed (`building-native-ui`, split into expo-native-ui and expo-router; `expo-tailwind-setup`). The kit's own rules (`rn-idioms.md`, `expo-idioms.md`) stay the project's conventions; where a third-party skill disagrees, the project's rules win.
+
 ### verify.d protocol
 Project-specific checks are **executable** (`chmod +x`) files in `<project-dir>/verify.d/`. The engine runs all of them in alphabetical order.
 
@@ -678,7 +690,7 @@ If the prompt does not appear: `/plugin marketplace add <bu-repo-url>` and `/plu
 ### What `doctor.sh` checks
 `jq`, git repository · whether `sdkit.env` loads, `BASE_BRANCH` exists, `VERIFY_CMD` is executable · whether `project.md` is filled in (no bare `TODO` left) and has a risk rubric ·
 `known-pitfalls.md`, `CLAUDE.md`, `<project-dir>/.gitignore` · whether there is an active `verify.d` policy (warning if not) · whether `settings.json` is valid and has a `deny` list ·
-in plugin mode whether the plugin is enabled and the marketplace address is defined, in copy mode whether the hooks are wired · non-Claude hosts (detected by the kit block in `AGENTS.md` or `.agents/skills/spec-driven-dev`; third-party skills in `.agents/skills` from `npx skills add` do not count): `AGENTS.md`, `.agents/skills`, whether kit scripts (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) are executable, `hooks/adapt.sh`, `core.hooksPath`, role files for the installed host (`.codex/agents`, `.opencode/agents` + guard plugin, `.cursor/agents` + valid `hooks.json`, `.gemini/agents` + valid `settings.json`) · whether each host's CLI is installed (warning only: only `run-role.sh` needs it) · the stack's `tools.sh` list (on `PATH` or in the repo's `node_modules/.bin`; failure if a `required` one is missing, warning if an `optional` one is missing) and `openspec`.
+in plugin mode whether the plugin is enabled and the marketplace address is defined, in copy mode whether the hooks are wired · non-Claude hosts (detected by the kit block in `AGENTS.md` or `.agents/skills/spec-driven-dev`; third-party skills in `.agents/skills` from `npx skills add` do not count): `AGENTS.md`, `.agents/skills`, whether kit scripts (`verify-core`, `state`, `parse-verdict`, `run-role` ... ) are executable, `hooks/adapt.sh`, `core.hooksPath`, role files for the installed host (`.codex/agents`, `.opencode/agents` + guard plugin, `.cursor/agents` + valid `hooks.json`, `.gemini/agents` + valid `settings.json`) · whether each host's CLI is installed (warning only: only `run-role.sh` needs it) · on `react-native`, outdated third-party Expo skills (warning) · the stack's `tools.sh` list (on `PATH` or in the repo's `node_modules/.bin`; failure if a `required` one is missing, warning if an `optional` one is missing) and `openspec`.
 
 ### `upgrade.sh` (updating)
 Moves a project that uses the kit to the new version: detects the hosts (from the presence of `.codex/`, `.opencode/agents`, `.cursor/agents`, `.gemini/agents`; `AGENTS.md`/`.agents/skills` for the old 0.3 Codex layout), the mode and the stack, adds new files (does not touch existing ones), adds missing lines to `.gitignore`, runs `sync.sh` in copy or non-Claude installs, and finishes with `doctor.sh`. The plugin side is refreshed separately with `/plugin`. Details and manual steps per version: [upgrading.md](upgrading.md). **Claude projects in copy mode:** `.claude/settings.json` is owned by the project, so new hooks (`guard-readonly` for PreToolUse `Bash|Edit|Write|NotebookEdit`, `usage-log` for Stop and SubagentStop) must be merged by hand; source `templates/settings.copy.json`.
