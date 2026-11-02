@@ -190,6 +190,18 @@ expect "doctor accepts prettier from node_modules/.bin" 0 bash -c "PATH='$nopret
 expect "check-tools hook accepts prettier from node_modules/.bin" 1 bash -c "echo '{}' | PATH='$noprettier' CLAUDE_PROJECT_DIR='$rna' '$ROOT/hooks/check-tools.sh' | grep -q -- '- prettier'"
 rm "$rna/node_modules/.bin/prettier"
 expect "check-tools hook reports prettier when it is nowhere" 0 bash -c "echo '{}' | PATH='$noprettier' CLAUDE_PROJECT_DIR='$rna' '$ROOT/hooks/check-tools.sh' | grep -q -- '- prettier'"
+# react-native stack content: Expo rules and the pitfalls seed, nothing of it in other stacks
+expect "init react-native installs the Expo rules" 0 test -f "$tmp/init-react-native/.sdkit/rules/expo-idioms.md"
+expect "init react-native seeds the RN pitfalls" 0 grep -q 'FlashList v2' "$tmp/init-react-native/.sdkit/known-pitfalls.md"
+expect "init nextjs gets neither" 1 bash -c "test -f '$tmp/init-nextjs/.sdkit/rules/expo-idioms.md' || grep -q 'FlashList' '$tmp/init-nextjs/.sdkit/known-pitfalls.md'"
+# RN forbidden-patterns policy: inline style warns inside renderItem only (NativeWind keeps dynamic values in style)
+rnp="$tmp/rn-policy"; mkdir -p "$rnp"; git -C "$rnp" init -q -b main; ( cd "$rnp" && git config user.email t@t && git config user.name t && echo '{}' > package.json && git add -A && git commit -qm b ) >/dev/null 2>&1
+rnbase="$(git -C "$rnp" rev-parse HEAD)"
+printf '%s\n' 'const L = () => <FlatList data={d} renderItem={renderRow} />;' 'const Card = ({ on }) => <View className="rounded p-4" style={{ transform: [{ scale: on ? 0.95 : 1 }] }} />;' > "$rnp/Card.tsx"
+printf '%s\n' 'const L = () => (' '  <FlatList' '    data={d}' '    renderItem={({ item }) => (' '      <View style={{ padding: 4 }}><Text>{item.name}</Text></View>' '    )}' '  />' ');' > "$rnp/List.tsx"
+rnpol() { (cd "$rnp" && VERIFY_LIB="$ROOT/scripts/verify-lib.sh" VERIFY_MERGE_BASE="$rnbase" VERIFY_CHANGED="$1" VERIFY_CHANGED_SRC="$1" bash "$ROOT/stacks/react-native/verify.d.example/10-forbidden-patterns.sh.example"); }
+expect "rn policy warns on style={{ inside renderItem" 0 bash -c "$(declare -f rnpol); rnp='$rnp' rnbase='$rnbase' ROOT='$ROOT'; rnpol List.tsx | grep -q 'WARN: List.tsx has an inline style'"
+expect "rn policy is quiet on style={{ outside renderItem" 1 bash -c "$(declare -f rnpol); rnp='$rnp' rnbase='$rnbase' ROOT='$ROOT'; rnpol Card.tsx | grep -q 'inline style'"
 # python / generic verify
 pyd="$tmp/py-verify"; mkdir -p "$pyd"; git -C "$pyd" init -q -b main; ( cd "$pyd" && git config user.email t@t && git config user.name t && printf '[project]\n' > pyproject.toml && git add -A && git commit -qm b && git checkout -qb f ) >/dev/null 2>&1
 echo 'def g(:' > "$pyd/bad.py"; expect "python verify fails on a syntax error" 1 bash -c "cd '$pyd' && '$ROOT/stacks/python/scripts/verify.sh' --fast --no-cache"

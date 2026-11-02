@@ -152,6 +152,15 @@ Nothing changes until you opt in. `ROUTING=off` stays the default, so `run-role.
 - **Exit codes of `run-role.sh` with `ROUTING=on`:** 7 = valid evidence already exists (nothing to run, do not retry), 8 = routing declined to run and there is no valid result (never a pass). Scripts that call `run-role.sh` must handle both.
 - **Turning it on:** set `RUN_ROLE_HOST` (and `VERIFIER_HOST` for independent roles), then `ROUTING=on`; look at a decision first with `route.sh explain --role <role>`. Details and limits: [design-routing.md](design-routing.md).
 
+## 1.4.0: Expo rules and React Native pitfalls
+
+Only `react-native` repos are affected. Rules and `known-pitfalls.md` are project-owned, so `sdkit upgrade` does not add or change them in an existing repo.
+
+- **New rule file** `stacks/react-native/rules/expo-idioms.md` (Expo Router headers, form sheets, edge-to-edge Android, Hermes `Intl`, NativeWind, `expo-image`, prebuild). To take it: `cp "$(sdkit where)/stacks/react-native/rules/expo-idioms.md" .sdkit/rules/`.
+- **`rn-idioms.md` changed:** styling no longer assumes `StyleSheet.create` (utility classes such as NativeWind keep static `className` strings and put only dynamic values in `style`), Expo uses `process.env.EXPO_OS` for platform branches, and there are new styling, animation and screen-state rules. Compare with `diff .sdkit/rules/rn-idioms.md "$(sdkit where)/stacks/react-native/rules/rn-idioms.md"` and merge what you want.
+- **Pitfalls seed:** new repos get `stacks/react-native/known-pitfalls.md` (FlashList v2 pagination, FlatList offsets, Android ScrollView offset, Yoga alignment, `setTimeout` navigation). Copy the entries you want into your own `.sdkit/known-pitfalls.md`.
+- **`verify.d` example `10-forbidden-patterns`:** the inline-style warning fires only on a `style={{ }}` inside a list's `renderItem`. If you enabled the policy, copy the new version over yours.
+
 ## 1.3.1: fewer false failures on React Native / Expo setups
 
 No manual step is required.

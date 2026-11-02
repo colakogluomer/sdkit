@@ -449,7 +449,7 @@ verify.sh [--fast] [--since-head] [--no-cache]
 | `python` | `pyproject.toml`, `setup.py`, `setup.cfg` or `requirements.txt` | per-package syntax (`py_compile`); unless `--fast`, `ruff`, `mypy` if configured, `pytest` (otherwise `unittest`). If `uv.lock`/`poetry.lock` exists, tools run via `uv run`/`poetry run`, forced with `PY_RUNNER`. A missing tool is a warning, not a failure |
 | `generic` | none (fallback) | `VERIFY_FAST_CMD` and `VERIFY_TEST_CMD` from `sdkit.env` run at the repo root; if both are empty, only the `verify.d` policies run and a warning is given |
 | `nextjs` | `next` in `package.json` | per-package typecheck, unless `--fast` lint and test; `next build` if `VERIFY_BUILD` is set; package manager from the lockfile or `NODE_PM` |
-| `react-native` | `react-native` in `package.json` | typecheck/lint/test; shares the `stacks/_node/scripts/node-lib.sh` helper with `nextjs` |
+| `react-native` | `react-native` in `package.json` | typecheck/lint/test; shares the `stacks/_node/scripts/node-lib.sh` helper with `nextjs`. Rules: `rn-idioms.md`, `rn-testing.md` and `expo-idioms.md` (Expo apps; a bare app can delete it); `known-pitfalls.md` is seeded with React Native / Expo list, layout and navigation pitfalls |
 
 Every stack provides: `detect.sh`, `scripts/{verify,steps,fmt,tools}.sh`, `permissions.txt`, `rules/`, `verify.d.example/`, and optionally a `known-pitfalls.md` seed (otherwise `init` writes the neutral template). The full contract is in `stacks/README.md`. A repo has **a single `STACK`**; a monorepo with multiple stacks is out of scope.
 Stack rule: verify only what changed, keep `--fast` really cheap, a missing tool is a `warn` (skipped), print little output.
